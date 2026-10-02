@@ -352,13 +352,32 @@ export const AdminVisitDetail: React.FC = () => {
         ) : (
           <div className="space-y-3 divide-y divide-gray-100">
             {audits.map((a) => (
-              <div key={a.id} className="pt-2 text-xs space-y-1">
+              <div key={a.id} className="pt-3 text-xs space-y-1.5">
                 <div className="flex items-center justify-between font-bold text-gray-700">
-                  <span className="uppercase bg-gray-100 px-2 py-0.5 rounded-md text-[10px]">
+                  <span className="uppercase bg-green-100 text-[#1B5E20] px-2 py-0.5 rounded-md text-[10px]">
                     {a.action}
                   </span>
-                  <span className="text-gray-400">{formatDateEn(a.created_at)}</span>
+                  <span className="text-gray-400">{formatDateEn(a.created_at)} ({formatTimeEn(a.created_at)})</span>
                 </div>
+                {a.old_values && a.new_values && (
+                  <div className="bg-gray-50 p-2.5 rounded-xl space-y-1 text-[11px]">
+                    {Object.keys(a.new_values).map((key) => {
+                      if (['updated_at', 'created_at', 'id', 'client_uuid'].includes(key)) return null;
+                      const oldVal = a.old_values?.[key];
+                      const newVal = a.new_values?.[key];
+                      if (oldVal === newVal) return null;
+                      return (
+                        <div key={key} className="flex justify-between font-mono">
+                          <span className="font-semibold text-gray-600">{key}:</span>
+                          <span className="text-gray-900">
+                            <span className="line-through text-red-500 mr-1">{String(oldVal ?? 'none')}</span>
+                            👉 <span className="text-green-700 font-bold ml-1">{String(newVal ?? 'none')}</span>
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             ))}
           </div>

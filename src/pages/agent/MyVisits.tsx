@@ -7,7 +7,7 @@ import type { VisitFull } from '../../types';
 import { StatusBadge } from '../../components/StatusBadge';
 import { LoadingSpinner } from '../../components/LoadingSpinner';
 import { formatDateEn, formatTimeEn } from '../../lib/export';
-import { Search, MapPin, User, Calendar, RefreshCw, ChevronRight } from 'lucide-react';
+import { Search, MapPin, User, Calendar, RefreshCw, ChevronRight, PlusCircle } from 'lucide-react';
 
 export const MyVisits: React.FC = () => {
   const { t } = useTranslation();
@@ -60,19 +60,28 @@ export const MyVisits: React.FC = () => {
   });
 
   return (
-    <div className="max-w-md mx-auto p-4 pb-28 space-y-4">
+    <div className="max-w-md mx-auto p-4 pb-36 space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-extrabold text-[#1B5E20]">{t('nav.my_visits')}</h2>
           <p className="text-xs text-gray-500 font-medium">Total: {visits.length} records</p>
         </div>
-        <button
-          onClick={fetchVisits}
-          className="p-2.5 bg-white border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50 min-h-[44px] min-w-[44px] flex items-center justify-center shadow-xs"
-          title="Refresh"
-        >
-          <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-[#2E7D32]' : ''}`} />
-        </button>
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={() => navigate('/agent/new-visit')}
+            className="flex items-center space-x-1 px-3 py-2.5 bg-[#2E7D32] hover:bg-[#1B5E20] text-white text-xs font-extrabold rounded-xl shadow-xs min-h-[44px]"
+          >
+            <PlusCircle className="w-4 h-4" />
+            <span>New Visit</span>
+          </button>
+          <button
+            onClick={fetchVisits}
+            className="p-2.5 bg-white border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50 min-h-[44px] min-w-[44px] flex items-center justify-center shadow-xs"
+            title="Refresh"
+          >
+            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-[#2E7D32]' : ''}`} />
+          </button>
+        </div>
       </div>
 
       <div className="relative">
@@ -150,6 +159,14 @@ export const MyVisits: React.FC = () => {
           ))}
         </div>
       )}
+
+      {/* Prominent Floating Action Button — New Visit */}
+      <button
+        onClick={() => navigate('/agent/new-visit')}
+        className="fixed bottom-6 left-1/2 -translate-x-1/2 flex items-center space-x-2 px-7 py-4 bg-[#2E7D32] hover:bg-[#1B5E20] active:bg-[#1B5E20] text-white font-black rounded-full shadow-2xl transition text-base min-h-[60px] z-50 ring-4 ring-green-100"
+      >
+        <PlusCircle className="w-6 h-6" />
+      </button>
     </div>
   );
 };

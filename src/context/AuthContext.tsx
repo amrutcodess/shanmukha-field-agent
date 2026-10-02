@@ -42,7 +42,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   useEffect(() => {
-    // Initial session load
     const initAuth = async () => {
       try {
         const { data: { session: currentSession } } = await supabase.auth.getSession();
@@ -65,8 +64,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     initAuth();
 
-    // Listen to auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
       setSession(newSession);
       setUser(newSession?.user ?? null);
 
@@ -94,36 +92,36 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? formatAgentEmail(usernameInput) 
         : usernameInput.trim();
 
+      console.log('Attempting sign in with email:', email);
+
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password: passwordInput,
       });
 
       if (error || !data.user) {
+        console.error('Supabase signInWithPassword error:', error);
         setIsLoading(false);
-        return { success: false, error: 'auth.err_invalid_credentials' };
+        return { success: false, error: error?.message || 'auth.err_invalid_credentials' };
       }
 
-      // Fetch profile to verify role and active state
       const userProfile = await fetchProfile(data.user.id);
 
       if (!userProfile) {
         await supabase.auth.signOut();
         setIsLoading(false);
-        return { success: false, error: 'auth.err_generic' };
+        return { success: false, error: 'Profile record not found for this user.' };
       }
 
-      // 1. Role match check
       if (userProfile.role !== targetRole) {
         await supabase.auth.signOut();
         setIsLoading(false);
         return { 
           success: false, 
-          error: 'auth.err_invalid_role'
+          error: `Account role mismatch: expected ${targetRole}, found ${userProfile.role}`
         };
       }
 
-      // 2. Active account check
       if (!userProfile.is_active) {
         await supabase.auth.signOut();
         setIsLoading(false);
@@ -141,8 +139,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setIsLoading(false);
       return { success: true };
     } catch (err: any) {
+      console.error('Login exception:', err);
       setIsLoading(false);
-      return { success: false, error: 'auth.err_generic' };
+      return { success: false, error: err.message || 'auth.err_generic' };
     }
   };
 

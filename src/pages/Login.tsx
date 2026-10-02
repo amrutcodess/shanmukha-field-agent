@@ -15,7 +15,7 @@ export const Login: React.FC = () => {
   const [username, setUsername] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [errorKey, setErrorKey] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   const currentLang = i18n.language || 'en';
@@ -29,7 +29,7 @@ export const Login: React.FC = () => {
     e.preventDefault();
     if (!username.trim() || !password) return;
 
-    setErrorKey(null);
+    setErrorMessage(null);
     setIsSubmitting(true);
 
     const result = await login(username, password, role);
@@ -41,7 +41,13 @@ export const Login: React.FC = () => {
         navigate('/agent/my-visits');
       }
     } else {
-      setErrorKey(result.error || 'auth.err_generic');
+      const msg = result.error || 'auth.err_generic';
+      // If error starts with auth., translate it; otherwise show raw string
+      if (msg.startsWith('auth.')) {
+        setErrorMessage(t(msg, { role: role === 'admin' ? t('auth.admin_login') : t('auth.agent_login') }));
+      } else {
+        setErrorMessage(msg);
+      }
     }
     setIsSubmitting(false);
   };
@@ -79,7 +85,7 @@ export const Login: React.FC = () => {
               type="button"
               onClick={() => {
                 setRole('agent');
-                setErrorKey(null);
+                setErrorMessage(null);
               }}
               className={`flex items-center justify-center space-x-2 py-3 rounded-lg text-sm font-bold transition min-h-[48px] ${
                 role === 'agent'
@@ -95,7 +101,7 @@ export const Login: React.FC = () => {
               type="button"
               onClick={() => {
                 setRole('admin');
-                setErrorKey(null);
+                setErrorMessage(null);
               }}
               className={`flex items-center justify-center space-x-2 py-3 rounded-lg text-sm font-bold transition min-h-[48px] ${
                 role === 'admin'
@@ -108,12 +114,10 @@ export const Login: React.FC = () => {
             </button>
           </div>
 
-          {errorKey && (
+          {errorMessage && (
             <div className="mb-4 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm font-semibold flex items-start space-x-2 animate-in fade-in">
               <span className="shrink-0 font-bold">⚠️</span>
-              <div>
-                {t(errorKey, { role: role === 'admin' ? t('auth.admin_login') : t('auth.agent_login') })}
-              </div>
+              <div>{errorMessage}</div>
             </div>
           )}
 

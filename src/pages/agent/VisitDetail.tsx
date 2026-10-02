@@ -17,6 +17,7 @@ import {
   CheckCircle,
   XCircle,
   ExternalLink,
+  Edit3,
 } from 'lucide-react';
 
 export const VisitDetail: React.FC = () => {
@@ -27,7 +28,15 @@ export const VisitDetail: React.FC = () => {
 
   const [visit, setVisit] = useState<VisitFull | null>(null);
   const [photoSignedUrl, setPhotoSignedUrl] = useState<string | null>(null);
+  const [prescriptionPhotoSignedUrl, setPrescriptionPhotoSignedUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  // Edit details modal state
+  const [isEditingDetails, setIsEditingDetails] = useState<boolean>(false);
+  const [editFarmerName, setEditFarmerName] = useState<string>('');
+  const [editFarmerPhone, setEditFarmerPhone] = useState<string>('');
+  const [editDiagnosis, setEditDiagnosis] = useState<string>('');
+  const [editPrescription, setEditPrescription] = useState<string>('');
 
   const [isUpdatingBought, setIsUpdatingBought] = useState<boolean>(false);
   const [purchaseAmount, setPurchaseAmount] = useState<string>('');
@@ -57,6 +66,10 @@ export const VisitDetail: React.FC = () => {
       if (v.purchase_image_path) {
         const url = await getSignedPhotoUrl(v.purchase_image_path);
         setPhotoSignedUrl(url);
+      }
+      if (v.prescription_image_path) {
+        const pUrl = await getSignedPhotoUrl(v.prescription_image_path);
+        setPrescriptionPhotoSignedUrl(pUrl);
       }
     } catch (err) {
       console.error('Error loading visit detail:', err);
@@ -135,6 +148,43 @@ export const VisitDetail: React.FC = () => {
     }
   };
 
+  const handleOpenEditModal = () => {
+    if (!visit) return;
+    setEditFarmerName(visit.farmer_name || '');
+    setEditFarmerPhone(visit.farmer_phone || '');
+    setEditDiagnosis(visit.diagnosis || '');
+    setEditPrescription(visit.prescription || '');
+    setIsEditingDetails(true);
+  };
+
+  const handleSaveEditDetails = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!visit) return;
+
+    setIsSaving(true);
+    setErrorMsg(null);
+    try {
+      const { error } = await supabase
+        .from('visits')
+        .update({
+          farmer_name: editFarmerName.trim(),
+          farmer_phone: editFarmerPhone.trim() || null,
+          diagnosis: editDiagnosis.trim(),
+          prescription: editPrescription.trim(),
+        })
+        .eq('id', visit.id);
+
+      if (error) throw error;
+
+      setIsEditingDetails(false);
+      await loadVisitDetail();
+    } catch (err: any) {
+      setErrorMsg('Failed to update details: ' + err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   if (isLoading) {
     return <LoadingSpinner message="Loading visit detail..." />;
   }
@@ -188,6 +238,13 @@ export const VisitDetail: React.FC = () => {
               </a>
             )}
           </div>
+          <button
+            onClick={handleOpenEditModal}
+            className="flex items-center space-x-1 px-3 py-2 bg-green-50 hover:bg-green-100 text-[#1B5E20] text-xs font-bold rounded-xl border border-green-200 shadow-2xs min-h-[40px]"
+          >
+            <Edit3 className="w-4 h-4" />
+            <span>Edit Details</span>
+          </button>
         </div>
 
         <div className="grid grid-cols-2 gap-3 text-xs">
@@ -256,9 +313,22 @@ export const VisitDetail: React.FC = () => {
           </div>
         </div>
 
+        {prescriptionPhotoSignedUrl && (
+          <div className="pt-3 border-t border-gray-100 space-y-2">
+            <span className="text-xs font-bold text-gray-500 block">Prescription Photo</span>
+            <a href={prescriptionPhotoSignedUrl} target="_blank" rel="noopener noreferrer">
+              <img
+                src={prescriptionPhotoSignedUrl}
+                alt="Prescription"
+                className="w-full max-h-64 object-cover rounded-xl border border-blue-200 bg-blue-50"
+              />
+            </a>
+          </div>
+        )}
+
         {photoSignedUrl && (
           <div className="pt-3 border-t border-gray-100 space-y-2">
-            <span className="text-xs font-bold text-gray-500 block">{t('visit.take_photo')}</span>
+            <span className="text-xs font-bold text-gray-500 block">Purchase Receipt Photo</span>
             <a href={photoSignedUrl} target="_blank" rel="noopener noreferrer">
               <img
                 src={photoSignedUrl}
@@ -385,6 +455,93 @@ export const VisitDetail: React.FC = () => {
             </button>
           </div>
         </form>
+      )}
+
+      {/* Edit Details Modal */}
+      {isEditingDetails && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+          <div className="bg-white w-full max-w-md rounded-2xl p-6 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-bold text-gray-900 border-b pb-2 flex items-center space-x-2">
+              <Edit3 className="w-5 h-5 text-[#2E7D32]" />
+              <span>Edit Visit Details</span>
+            </h3>
+
+            {errorMsg && (
+              <p className="text-xs font-bold text-red-600 bg-red-50 p-2.5 rounded-xl">{errorMsg}</p>
+            )}
+
+            <form onSubmit={handleSaveEditDetails} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">
+                  Farmer Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editFarmerName}
+                  onChange={(e) => setEditFarmerName(e.target.value)}
+                  className="w-full p-3 border rounded-xl text-sm min-h-[48px]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">
+                  Farmer Phone
+                </label>
+                <input
+                  type="tel"
+                  maxLength={10}
+                  value={editFarmerPhone}
+                  onChange={(e) => setEditFarmerPhone(e.target.value.replace(/\D/g, ''))}
+                  className="w-full p-3 border rounded-xl text-sm min-h-[48px]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">
+                  Diagnosis *
+                </label>
+                <textarea
+                  required
+                  rows={3}
+                  value={editDiagnosis}
+                  onChange={(e) => setEditDiagnosis(e.target.value)}
+                  className="w-full p-3 border rounded-xl text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">
+                  Prescription *
+                </label>
+                <textarea
+                  required
+                  rows={3}
+                  value={editPrescription}
+                  onChange={(e) => setEditPrescription(e.target.value)}
+                  className="w-full p-3 border rounded-xl text-sm"
+                />
+              </div>
+
+              <div className="flex space-x-2 pt-3 border-t">
+                <button
+                  type="button"
+                  onClick={() => setIsEditingDetails(false)}
+                  className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl min-h-[48px]"
+                >
+                  {t('admin.cancel')}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="flex-1 py-3 bg-[#2E7D32] text-white font-bold rounded-xl hover:bg-[#1B5E20] min-h-[48px]"
+                >
+                  {isSaving ? t('visit.saving') : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       <ConfirmModal

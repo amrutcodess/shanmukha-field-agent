@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../hooks/useAuth';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { fetchAllRegions, fetchDistrictsByRegion, fetchVillagesByDistrict, getOrCreateLocationRPC } from '../../lib/location';
-import { compressPhoto, uploadPurchasePhoto } from '../../lib/image';
+import { compressPhoto, uploadPurchasePhoto, uploadPrescriptionPhoto } from '../../lib/image';
 import { saveOfflineDraft } from '../../lib/db';
 import { supabase } from '../../lib/supabase';
 import type { Region, District, Village, Crop, Product } from '../../types';
@@ -27,6 +27,7 @@ export const NewVisit: React.FC = () => {
   const isOnline = useOnlineStatus();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const prescriptionFileInputRef = useRef<HTMLInputElement>(null);
 
   const [visitedDate, setVisitedDate] = useState<string>(
     new Date().toISOString().split('T')[0]
@@ -40,6 +41,10 @@ export const NewVisit: React.FC = () => {
   const [regionInput, setRegionInput] = useState<string>('');
   const [districtInput, setDistrictInput] = useState<string>('');
   const [villageInput, setVillageInput] = useState<string>('');
+
+  const [showRegionDropdown, setShowRegionDropdown] = useState<boolean>(false);
+  const [showDistrictDropdown, setShowDistrictDropdown] = useState<boolean>(false);
+  const [showVillageDropdown, setShowVillageDropdown] = useState<boolean>(false);
 
   const [regions, setRegions] = useState<Region[]>([]);
   const [districts, setDistricts] = useState<District[]>([]);
@@ -58,6 +63,10 @@ export const NewVisit: React.FC = () => {
   const [purchaseAmount, setPurchaseAmount] = useState<string>('');
   const [photoBlob, setPhotoBlob] = useState<Blob | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+
+  // Prescription photo (optional)
+  const [prescriptionBlob, setPrescriptionBlob] = useState<Blob | null>(null);
+  const [prescriptionPreviewUrl, setPrescriptionPreviewUrl] = useState<string | null>(null);
 
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
@@ -145,6 +154,28 @@ export const NewVisit: React.FC = () => {
     setPhotoPreviewUrl(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+  };
+
+  const handlePrescriptionPhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const originalFile = e.target.files[0];
+      try {
+        const compressed = await compressPhoto(originalFile);
+        setPrescriptionBlob(compressed);
+        setPrescriptionPreviewUrl(URL.createObjectURL(compressed));
+      } catch (err) {
+        setPrescriptionBlob(originalFile);
+        setPrescriptionPreviewUrl(URL.createObjectURL(originalFile));
+      }
+    }
+  };
+
+  const handleClearPrescriptionPhoto = () => {
+    setPrescriptionBlob(null);
+    setPrescriptionPreviewUrl(null);
+    if (prescriptionFileInputRef.current) {
+      prescriptionFileInputRef.current.value = '';
     }
   };
 
@@ -238,6 +269,11 @@ export const NewVisit: React.FC = () => {
         purchase_image_path = await uploadPurchasePhoto(profile.id, client_uuid, photoBlob);
       }
 
+      let prescription_image_path: string | null = null;
+      if (prescriptionBlob) {
+        prescription_image_path = await uploadPrescriptionPhoto(profile.id, client_uuid, prescriptionBlob);
+      }
+
       const status = purchased ? 'final' : 'pending';
       const finalized_at = purchased ? new Date().toISOString() : null;
 
@@ -258,6 +294,7 @@ export const NewVisit: React.FC = () => {
         purchased,
         purchase_amount: numericAmount,
         purchase_image_path,
+        prescription_image_path,
         status,
         finalized_at,
         latitude,
@@ -297,27 +334,40 @@ export const NewVisit: React.FC = () => {
     setPurchaseAmount('');
     setPhotoBlob(null);
     setPhotoPreviewUrl(null);
+    setPrescriptionBlob(null);
+    setPrescriptionPreviewUrl(null);
     setIsSubmittedSuccess(false);
   };
 
   if (isSubmittedSuccess) {
     return (
-      <div className="max-w-md mx-auto p-4 pt-8 text-center pb-24">
-        <div className="bg-white p-6 rounded-2xl border border-green-100 shadow-sm space-y-4">
+      <div className="max-w-md mx-auto p-4 pt-4 text-center pb-28 space-y-4">
+        <div className="bg-[#2E7D32] text-white p-4 rounded-2xl shadow-md text-left flex items-center space-x-3">
+          <CheckCircle className="w-8 h-8 text-green-200 shrink-0" />
+          <div>
+            <h2 className="text-base font-extrabold">Successfully Submitted!</h2>
+            <p className="text-xs text-green-100">The visit record has been saved and uploaded.</p>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-2xl border border-green-200 shadow-sm space-y-4">
           <div className="w-16 h-16 bg-[#E8F5E9] text-[#2E7D32] rounded-full flex items-center justify-center mx-auto">
             <CheckCircle className="w-10 h-10" />
           </div>
-          <h2 className="text-xl font-bold text-gray-900">{t('visit.visit_added_success')}</h2>
-          <p className="text-sm text-gray-600">
-            {!isOnline
-              ? t('app.offline_banner')
-              : 'Visit recorded and uploaded securely.'}
-          </p>
+          <div>
+            <h3 className="text-lg font-extrabold text-gray-900">{farmerName || 'Farmer Visit'}</h3>
+            <p className="text-xs font-semibold text-gray-500 mt-1">
+              Location: {villageInput}, {districtInput}
+            </p>
+            <div className="mt-2 inline-block px-3 py-1 bg-green-100 text-[#1B5E20] font-bold text-xs rounded-full">
+              Status: {purchased ? 'Purchased (Final)' : 'Pending'}
+            </div>
+          </div>
 
-          <div className="pt-4 space-y-3">
+          <div className="pt-4 space-y-3 border-t border-gray-100">
             <button
               onClick={resetForm}
-              className="w-full py-4 px-4 bg-[#2E7D32] text-white font-bold rounded-xl shadow-xs hover:bg-[#1B5E20] flex items-center justify-center space-x-2 min-h-[52px]"
+              className="w-full py-4 px-4 bg-[#2E7D32] text-white font-extrabold rounded-xl shadow-md hover:bg-[#1B5E20] flex items-center justify-center space-x-2 min-h-[52px]"
             >
               <PlusCircle className="w-5 h-5" />
               <span>{t('visit.add_another')}</span>
@@ -433,64 +483,118 @@ export const NewVisit: React.FC = () => {
             </span>
           </div>
 
-          <div>
+          <div className="relative">
             <label className="block text-xs font-bold text-gray-700 mb-1">
               {t('visit.region')} *
             </label>
             <input
               type="text"
               required
-              list="regions-list"
               value={regionInput}
-              onChange={(e) => setRegionInput(e.target.value)}
+              onFocus={() => setShowRegionDropdown(true)}
+              onChange={(e) => {
+                setRegionInput(e.target.value);
+                setShowRegionDropdown(true);
+              }}
               placeholder="e.g. Guntur Region"
-              className="w-full p-3 border border-gray-300 rounded-xl text-sm min-h-[48px]"
+              className="w-full p-3 border border-gray-300 rounded-xl text-sm min-h-[48px] bg-white"
             />
-            <datalist id="regions-list">
-              {regions.map((r) => (
-                <option key={r.id} value={r.name} />
-              ))}
-            </datalist>
+            {showRegionDropdown && regions.length > 0 && (
+              <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto divide-y divide-gray-100">
+                {regions
+                  .filter((r) => r.name.toLowerCase().includes(regionInput.toLowerCase()))
+                  .map((r) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setRegionInput(r.name);
+                        setShowRegionDropdown(false);
+                      }}
+                      className="w-full px-4 py-2.5 text-left text-sm font-semibold text-gray-800 hover:bg-[#E8F5E9] hover:text-[#1B5E20] transition"
+                    >
+                      {r.name}
+                    </button>
+                  ))}
+              </div>
+            )}
           </div>
 
-          <div>
+          <div className="relative">
             <label className="block text-xs font-bold text-gray-700 mb-1">
               {t('visit.district')} *
             </label>
             <input
               type="text"
               required
-              list="districts-list"
               value={districtInput}
-              onChange={(e) => setDistrictInput(e.target.value)}
+              onFocus={() => setShowDistrictDropdown(true)}
+              onChange={(e) => {
+                setDistrictInput(e.target.value);
+                setShowDistrictDropdown(true);
+              }}
               placeholder="e.g. Guntur"
-              className="w-full p-3 border border-gray-300 rounded-xl text-sm min-h-[48px]"
+              className="w-full p-3 border border-gray-300 rounded-xl text-sm min-h-[48px] bg-white"
             />
-            <datalist id="districts-list">
-              {districts.map((d) => (
-                <option key={d.id} value={d.name} />
-              ))}
-            </datalist>
+            {showDistrictDropdown && districts.length > 0 && (
+              <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto divide-y divide-gray-100">
+                {districts
+                  .filter((d) => d.name.toLowerCase().includes(districtInput.toLowerCase()))
+                  .map((d) => (
+                    <button
+                      key={d.id}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setDistrictInput(d.name);
+                        setShowDistrictDropdown(false);
+                      }}
+                      className="w-full px-4 py-2.5 text-left text-sm font-semibold text-gray-800 hover:bg-[#E8F5E9] hover:text-[#1B5E20] transition"
+                    >
+                      {d.name}
+                    </button>
+                  ))}
+              </div>
+            )}
           </div>
 
-          <div>
+          <div className="relative">
             <label className="block text-xs font-bold text-gray-700 mb-1">
               {t('visit.village')} *
             </label>
             <input
               type="text"
               required
-              list="villages-list"
               value={villageInput}
-              onChange={(e) => setVillageInput(e.target.value)}
+              onFocus={() => setShowVillageDropdown(true)}
+              onChange={(e) => {
+                setVillageInput(e.target.value);
+                setShowVillageDropdown(true);
+              }}
               placeholder="e.g. Tenali"
-              className="w-full p-3 border border-gray-300 rounded-xl text-sm min-h-[48px]"
+              className="w-full p-3 border border-gray-300 rounded-xl text-sm min-h-[48px] bg-white"
             />
-            <datalist id="villages-list">
-              {villages.map((v) => (
-                <option key={v.id} value={v.name} />
-              ))}
-            </datalist>
+            {showVillageDropdown && villages.length > 0 && (
+              <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto divide-y divide-gray-100">
+                {villages
+                  .filter((v) => v.name.toLowerCase().includes(villageInput.toLowerCase()))
+                  .map((v) => (
+                    <button
+                      key={v.id}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setVillageInput(v.name);
+                        setShowVillageDropdown(false);
+                      }}
+                      className="w-full px-4 py-2.5 text-left text-sm font-semibold text-gray-800 hover:bg-[#E8F5E9] hover:text-[#1B5E20] transition"
+                    >
+                      {v.name}
+                    </button>
+                  ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -590,6 +694,48 @@ export const NewVisit: React.FC = () => {
               placeholder={t('visit.prescription_placeholder')}
               className="w-full p-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#2E7D32] focus:outline-hidden"
             />
+          </div>
+
+          {/* Prescription Photo — optional */}
+          <div>
+            <label className="block text-xs font-bold text-gray-700 mb-1 flex items-center space-x-1">
+              <Camera className="w-3.5 h-3.5 text-[#2E7D32]" />
+              <span>Prescription Photo <span className="text-gray-400 font-normal">(optional)</span></span>
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              ref={prescriptionFileInputRef}
+              onChange={handlePrescriptionPhotoChange}
+              className="hidden"
+            />
+            {prescriptionPreviewUrl ? (
+              <div className="relative rounded-xl overflow-hidden border-2 border-blue-300 p-2 bg-blue-50 text-center">
+                <img
+                  src={prescriptionPreviewUrl}
+                  alt="Prescription"
+                  className="max-h-40 mx-auto object-cover rounded-lg"
+                />
+                <button
+                  type="button"
+                  onClick={handleClearPrescriptionPhoto}
+                  className="mt-2 px-4 py-2 bg-red-600 text-white text-xs font-bold rounded-lg hover:bg-red-700 min-h-[44px]"
+                >
+                  Remove Photo
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => prescriptionFileInputRef.current?.click()}
+                className="w-full py-4 border-2 border-dashed border-blue-300 bg-blue-50/50 rounded-xl flex flex-col items-center justify-center text-blue-700 hover:bg-blue-50 transition min-h-[72px]"
+              >
+                <Camera className="w-7 h-7 mb-1 text-blue-500" />
+                <span className="text-sm font-bold">Upload Prescription Photo</span>
+                <span className="text-xs text-blue-400">Take a photo or choose from gallery</span>
+              </button>
+            )}
           </div>
 
           <div>

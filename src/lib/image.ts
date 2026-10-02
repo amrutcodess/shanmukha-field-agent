@@ -38,6 +38,27 @@ export const uploadPurchasePhoto = async (
   return data.path;
 };
 
+export const uploadPrescriptionPhoto = async (
+  userId: string,
+  clientUuid: string,
+  photoBlob: Blob
+): Promise<string> => {
+  const fileName = `${userId}/${clientUuid}_${Date.now()}.jpg`;
+
+  const { data, error } = await supabase.storage
+    .from('purchase-photos')
+    .upload(`prescriptions/${fileName}`, photoBlob, {
+      contentType: 'image/jpeg',
+      upsert: true,
+    });
+
+  if (error) {
+    throw new Error(`Prescription photo upload failed: ${error.message}`);
+  }
+
+  return data.path;
+};
+
 export const getSignedPhotoUrl = async (path: string): Promise<string | null> => {
   if (!path) return null;
   try {

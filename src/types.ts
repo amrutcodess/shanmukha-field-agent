@@ -75,6 +75,7 @@ export interface Visit {
   purchased: boolean;
   purchase_amount?: number | null;
   purchase_image_path?: string | null;
+  prescription_image_path?: string | null;
   status: VisitStatus;
   finalized_at?: string | null;
   latitude?: number | null;
