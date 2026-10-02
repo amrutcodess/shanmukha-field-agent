@@ -208,9 +208,9 @@ begin
   end if;
 
   -- 1. Region
-  select id into v_reg_id
-  from public.regions
-  where lower(btrim(name)) = lower(v_reg_name)
+  select r.id into v_reg_id
+  from public.regions r
+  where lower(btrim(r.name)) = lower(v_reg_name)
   limit 1;
 
   if v_reg_id is null then
@@ -220,9 +220,9 @@ begin
   end if;
 
   -- 2. District
-  select id into v_dist_id
-  from public.districts
-  where region_id = v_reg_id and lower(btrim(name)) = lower(v_dist_name)
+  select d.id into v_dist_id
+  from public.districts d
+  where d.region_id = v_reg_id and lower(btrim(d.name)) = lower(v_dist_name)
   limit 1;
 
   if v_dist_id is null then
@@ -232,9 +232,9 @@ begin
   end if;
 
   -- 3. Village
-  select id into v_vil_id
-  from public.villages
-  where district_id = v_dist_id and lower(btrim(name)) = lower(v_vil_name)
+  select vil.id into v_vil_id
+  from public.villages vil
+  where vil.district_id = v_dist_id and lower(btrim(vil.name)) = lower(v_vil_name)
   limit 1;
 
   if v_vil_id is null then
