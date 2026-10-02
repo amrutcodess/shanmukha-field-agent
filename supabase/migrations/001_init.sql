@@ -1,5 +1,5 @@
 -- Migration: 001_init.sql
--- Shanmukha Agritech: Field Agent Tracking Database Schema
+-- Shanmukha Agritech: Field Agent Tracking Database Schema (Idempotent)
 
 -- Enable Extensions
 create extension if not exists "pgcrypto";
@@ -138,12 +138,25 @@ begin
 end;
 $$ language plpgsql;
 
+drop trigger if exists tr_profiles_updated_at on public.profiles;
 create trigger tr_profiles_updated_at before update on public.profiles for each row execute function public.set_updated_at();
+
+drop trigger if exists tr_regions_updated_at on public.regions;
 create trigger tr_regions_updated_at before update on public.regions for each row execute function public.set_updated_at();
+
+drop trigger if exists tr_districts_updated_at on public.districts;
 create trigger tr_districts_updated_at before update on public.districts for each row execute function public.set_updated_at();
+
+drop trigger if exists tr_villages_updated_at on public.villages;
 create trigger tr_villages_updated_at before update on public.villages for each row execute function public.set_updated_at();
+
+drop trigger if exists tr_crops_updated_at on public.crops;
 create trigger tr_crops_updated_at before update on public.crops for each row execute function public.set_updated_at();
+
+drop trigger if exists tr_products_updated_at on public.products;
 create trigger tr_products_updated_at before update on public.products for each row execute function public.set_updated_at();
+
+drop trigger if exists tr_visits_updated_at on public.visits;
 create trigger tr_visits_updated_at before update on public.visits for each row execute function public.set_updated_at();
 
 -- Visit Audit trigger
@@ -168,9 +181,8 @@ begin
 end;
 $$ language plpgsql security definer;
 
-create trigger tr_visits_audit
-after update on public.visits
-for each row execute function public.audit_visit_changes();
+drop trigger if exists tr_visits_audit on public.visits;
+create trigger tr_visits_audit after update on public.visits for each row execute function public.audit_visit_changes();
 
 -- Helper function to format Title Case for location names
 create or replace function public.to_title_case(p_text text)
@@ -368,61 +380,75 @@ alter table public.visits enable row level security;
 alter table public.visit_audit enable row level security;
 
 -- Profiles Policies
+drop policy if exists "Read profiles: self or admin" on public.profiles;
 create policy "Read profiles: self or admin"
   on public.profiles for select
   using (id = auth.uid() or public.is_admin());
 
+drop policy if exists "Insert profiles: admin only" on public.profiles;
 create policy "Insert profiles: admin only"
   on public.profiles for insert
   with check (public.is_admin());
 
+drop policy if exists "Update profiles: admin only" on public.profiles;
 create policy "Update profiles: admin only"
   on public.profiles for update
   using (public.is_admin());
 
 -- Locations Policies
+drop policy if exists "Read regions: authenticated" on public.regions;
 create policy "Read regions: authenticated"
   on public.regions for select
   using (auth.role() = 'authenticated');
 
+drop policy if exists "Write regions: admin only" on public.regions;
 create policy "Write regions: admin only"
   on public.regions for all
   using (public.is_admin());
 
+drop policy if exists "Read districts: authenticated" on public.districts;
 create policy "Read districts: authenticated"
   on public.districts for select
   using (auth.role() = 'authenticated');
 
+drop policy if exists "Write districts: admin only" on public.districts;
 create policy "Write districts: admin only"
   on public.districts for all
   using (public.is_admin());
 
+drop policy if exists "Read villages: authenticated" on public.villages;
 create policy "Read villages: authenticated"
   on public.villages for select
   using (auth.role() = 'authenticated');
 
+drop policy if exists "Write villages: admin only" on public.villages;
 create policy "Write villages: admin only"
   on public.villages for all
   using (public.is_admin());
 
 -- Crops & Products Policies
+drop policy if exists "Read crops: authenticated" on public.crops;
 create policy "Read crops: authenticated"
   on public.crops for select
   using (auth.role() = 'authenticated');
 
+drop policy if exists "Write crops: admin only" on public.crops;
 create policy "Write crops: admin only"
   on public.crops for all
   using (public.is_admin());
 
+drop policy if exists "Read products: authenticated" on public.products;
 create policy "Read products: authenticated"
   on public.products for select
   using (auth.role() = 'authenticated');
 
+drop policy if exists "Write products: admin only" on public.products;
 create policy "Write products: admin only"
   on public.products for all
   using (public.is_admin());
 
 -- Visits Policies
+drop policy if exists "Read visits: own or admin" on public.visits;
 create policy "Read visits: own or admin"
   on public.visits for select
   using (
@@ -430,6 +456,7 @@ create policy "Read visits: own or admin"
     or (agent_id = auth.uid() and deleted_at is null)
   );
 
+drop policy if exists "Insert visits: active agent or admin" on public.visits;
 create policy "Insert visits: active agent or admin"
   on public.visits for insert
   with check (
@@ -443,6 +470,7 @@ create policy "Insert visits: active agent or admin"
     )
   );
 
+drop policy if exists "Update visits: pending own or admin" on public.visits;
 create policy "Update visits: pending own or admin"
   on public.visits for update
   using (
@@ -455,6 +483,7 @@ create policy "Update visits: pending own or admin"
   );
 
 -- Audit log policies
+drop policy if exists "Read audit log: admin only" on public.visit_audit;
 create policy "Read audit log: admin only"
   on public.visit_audit for select
   using (public.is_admin());
@@ -465,6 +494,7 @@ insert into storage.buckets (id, name, public)
 values ('purchase-photos', 'purchase-photos', false)
 on conflict (id) do nothing;
 
+drop policy if exists "Upload photos: agent into own folder or admin" on storage.objects;
 create policy "Upload photos: agent into own folder or admin"
   on storage.objects for insert
   with check (
@@ -475,6 +505,7 @@ create policy "Upload photos: agent into own folder or admin"
     )
   );
 
+drop policy if exists "Read photos: own folder or admin" on storage.objects;
 create policy "Read photos: own folder or admin"
   on storage.objects for select
   using (
@@ -485,12 +516,14 @@ create policy "Read photos: own folder or admin"
     )
   );
 
+drop policy if exists "Manage photos: admin only" on storage.objects;
 create policy "Manage photos: admin only"
   on storage.objects for update
   using (
     bucket_id = 'purchase-photos' and public.is_admin()
   );
 
+drop policy if exists "Delete photos: admin only" on storage.objects;
 create policy "Delete photos: admin only"
   on storage.objects for delete
   using (
