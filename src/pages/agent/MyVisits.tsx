@@ -34,7 +34,7 @@ export const MyVisits: React.FC = () => {
       setVisits((data as VisitFull[]) || []);
     } catch (err) {
       console.error('Error fetching agent visits:', err);
-    } fontally: {
+    } finally {
       setIsLoading(false);
     }
   }, [profile]);

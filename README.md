@@ -21,7 +21,7 @@ A complete, production-ready, mobile-first Progressive Web Application built for
 
 ## 📋 Technology Stack
 
-- **Frontend**: React 18 + Vite + TypeScript + Tailwind CSS
+- **Frontend**: React 19 + Vite 8 + TypeScript 6 + Tailwind CSS 4
 - **Database & Auth**: `@supabase/supabase-js` (Supabase Auth, Postgres, Storage, Edge Functions)
 - **Internationalization**: `react-i18next` & `i18next`
 - **Routing**: `react-router-dom`
@@ -38,8 +38,8 @@ Follow these exact steps to set up and deploy the project from scratch:
 
 ### Step 1: Clone & Install Dependencies
 ```bash
-git clone https://github.com/your-org/fieldagent.git
-cd fieldagent
+git clone https://github.com/amrutcodess/shanmukha-field-agent.git
+cd shanmukha-field-agent
 npm install
 ```
 

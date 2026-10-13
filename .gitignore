@@ -29,3 +29,7 @@ dist-ssr
 
 .vercel
 .env*
+!.env.example
+
+# Supabase CLI local state (never commit: holds the linked project ref)
+supabase/.temp/

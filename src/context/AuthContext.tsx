@@ -92,8 +92,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? formatAgentEmail(usernameInput) 
         : usernameInput.trim();
 
-      console.log('Attempting sign in with email:', email);
-
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password: passwordInput,

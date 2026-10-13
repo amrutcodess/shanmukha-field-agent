@@ -129,7 +129,7 @@ export const Locations: React.FC = () => {
       await loadTreeData();
     } catch (err: any) {
       alert('Rename failed: ' + err.message);
-    } fontally: {
+    } finally {
       setIsSubmitting(false);
     }
   };
