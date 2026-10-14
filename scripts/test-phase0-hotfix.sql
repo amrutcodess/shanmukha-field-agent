@@ -24,6 +24,26 @@ declare
   v_crop_id uuid;
   v_visit1_id uuid;
 begin
+  -- Insert dummy auth.users first to satisfy foreign key constraint on public.profiles(id)
+  insert into auth.users (
+    id,
+    instance_id,
+    aud,
+    role,
+    email,
+    encrypted_password,
+    email_confirmed_at,
+    raw_app_meta_data,
+    raw_user_meta_data,
+    created_at,
+    updated_at
+  ) values 
+    (v_admin_id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'admin_test@test.local', 'dummy_hash', now(), '{"provider":"email","providers":["email"]}', '{}', now(), now()),
+    (v_agent1_id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'agent1_test@test.local', 'dummy_hash', now(), '{"provider":"email","providers":["email"]}', '{}', now(), now()),
+    (v_agent2_id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'agent2_test@test.local', 'dummy_hash', now(), '{"provider":"email","providers":["email"]}', '{}', now(), now()),
+    (v_deact_id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'deact_test@test.local', 'dummy_hash', now(), '{"provider":"email","providers":["email"]}', '{}', now(), now())
+  on conflict (id) do nothing;
+
   -- Insert dummy profiles
   insert into public.profiles (id, role, full_name, username, is_active)
   values 
@@ -58,6 +78,7 @@ begin
     agent_id,
     village_id,
     crop_id,
+    duration_minutes,
     farmer_name,
     farmer_phone,
     diagnosis,
@@ -68,6 +89,7 @@ begin
     v_agent1_id,
     v_vil_id,
     v_crop_id,
+    20,
     'Farmer Ramesh',
     '9876543210',
     'Leaf blast detected',
@@ -82,7 +104,8 @@ begin
   update public.visits
   set status = 'final',
       purchased = true,
-      purchase_amount = 500
+      purchase_amount = 500,
+      purchase_image_path = v_agent1_id || '/receipt_test.jpg'
   where id = v_visit1_id;
 
   if not found then
@@ -136,9 +159,9 @@ begin
   -- Deactivated agent cannot insert visits
   begin
     insert into public.visits (
-      agent_id, village_id, crop_id, farmer_name, farmer_phone, status
+      agent_id, village_id, crop_id, duration_minutes, farmer_name, farmer_phone, diagnosis, prescription, status
     ) values (
-      v_deact_id, v_vil_id, v_crop_id, 'Bad Farmer', '9000000000', 'pending'
+      v_deact_id, v_vil_id, v_crop_id, 15, 'Bad Farmer', '9000000000', 'Diagnosis', 'Prescription', 'pending'
     );
     raise exception 'TEST FAILED: Deactivated agent insert should have been rejected by RLS';
   exception when others then
