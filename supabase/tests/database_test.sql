@@ -172,15 +172,19 @@ begin
 
   -- =========================================================================
   -- POSITIVE CONTROL: Agent inserts & completes own visit with service attached
+  -- Uses Agent B and Farmer B so it does not collide with Agent A's visit_a1 in_progress
   -- =========================================================================
   begin
+    perform set_config('role', 'authenticated', true);
+    perform set_config('request.jwt.claim.sub', v_agent_b_id::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_agent_b_id::text, 'role', 'authenticated')::text, true);
+
     v_own_visit_id := gen_random_uuid();
-    -- Insert visit 2 days in past so it does not overlap with visit_a1
     insert into public.farm_visits (
       id, farmer_id, crop_cycle_id, agent_id, status, started_at, start_lat, start_lng, tracking_mode
     ) values (
-      v_own_visit_id, v_farmer_a_id, v_cycle_a_id, v_agent_a_id, 'in_progress',
-      now() - interval '2 days', 16.506174, 80.648015, 'native_continuous'
+      v_own_visit_id, v_farmer_b_id, v_cycle_a_id, v_agent_b_id, 'in_progress',
+      now() - interval '2 days', 16.507174, 80.649015, 'native_continuous'
     );
 
     insert into public.visit_services (visit_id, service_id)
