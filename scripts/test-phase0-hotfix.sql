@@ -199,6 +199,50 @@ begin
     raise notice 'PASS: F9 - admin_merge_location resolved duplicate village collision without error';
   end;
 
+  -- Test F2: Storage policies for legacy and new prescriptions prefix
+  declare
+    v_obj_legacy uuid := gen_random_uuid();
+    v_obj_new uuid := gen_random_uuid();
+  begin
+    perform set_config('role', 'postgres', true);
+    insert into storage.buckets (id, name, public) 
+    values ('purchase-photos', 'purchase-photos', false)
+    on conflict (id) do nothing;
+
+    -- Create a legacy file for agent 1: prescriptions/{agent1_id}/rx_legacy.jpg
+    insert into storage.objects (id, bucket_id, name, owner)
+    values (v_obj_legacy, 'purchase-photos', 'prescriptions/' || v_agent1_id || '/rx_legacy.jpg', v_agent1_id);
+
+    -- Create a new-style file for agent 1: {agent1_id}/prescriptions/rx_new.jpg
+    insert into storage.objects (id, bucket_id, name, owner)
+    values (v_obj_new, 'purchase-photos', v_agent1_id || '/prescriptions/rx_new.jpg', v_agent1_id);
+
+    -- Switch to agent 1
+    perform set_config('role', 'authenticated', true);
+    perform set_config('request.jwt.claim.sub', v_agent1_id::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_agent1_id::text, 'role', 'authenticated')::text, true);
+
+    if not exists (select 1 from storage.objects where name = 'prescriptions/' || v_agent1_id || '/rx_legacy.jpg') then
+      raise exception 'TEST FAILED: Agent 1 should be able to read own legacy prescription file';
+    end if;
+    if not exists (select 1 from storage.objects where name = v_agent1_id || '/prescriptions/rx_new.jpg') then
+      raise exception 'TEST FAILED: Agent 1 should be able to read own new prescription file';
+    end if;
+    raise notice 'PASS: F2 - Agent 1 can read own legacy and new prescription files';
+
+    -- Switch to agent 2
+    perform set_config('request.jwt.claim.sub', v_agent2_id::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_agent2_id::text, 'role', 'authenticated')::text, true);
+
+    if exists (select 1 from storage.objects where name = 'prescriptions/' || v_agent1_id || '/rx_legacy.jpg') then
+      raise exception 'TEST FAILED: Agent 2 should NOT be able to read Agent 1 legacy prescription file';
+    end if;
+    if exists (select 1 from storage.objects where name = v_agent1_id || '/prescriptions/rx_new.jpg') then
+      raise exception 'TEST FAILED: Agent 2 should NOT be able to read Agent 1 new prescription file';
+    end if;
+    raise notice 'PASS: F2 - Agent 2 is blocked from reading Agent 1 legacy and new files';
+  end;
+
   raise notice '=== ALL PHASE 0 HOTFIX TESTS PASSED SUCCESSFULLY ===';
 end $$;
 

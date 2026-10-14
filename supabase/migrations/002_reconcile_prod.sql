@@ -7,7 +7,8 @@ alter table public.visits
   add column if not exists prescription_image_path text;
 
 -- 2. Update visits_full view to include prescription_image_path
-create or replace view public.visits_full as
+drop view if exists public.visits_full;
+create view public.visits_full as
 select 
   v.id,
   v.client_uuid,
