@@ -14,8 +14,8 @@
 | Phase | Backend slice | Frontend slice | Status |
 |---|---|---|---|
 | 0 Safety net and hotfix (A4) | Complete | Complete | ✅ **GATE PASSED** — 14/14 tests PASS on staging (commit 88cd071) |
-| 1 Foundation, schema, RLS | Complete (Migrations 004-008, Seeds, Tests) | none | ⏳ Awaiting staging execution & Gate 1 Review |
-| 2 Admin basics | Claude Code | Antigravity | Not started |
+| 1 Foundation, schema, RLS | Complete (Migrations 004-009, Seeds, Tests) | none | ✅ **GATE 1 PASSED** — 19/19 tests PASS on staging (commit cf49aca) |
+| 2 Admin basics | Claude Code | Antigravity | Ready to start |
 | 3 Consent and onboarding | Claude Code | Antigravity | Not started |
 | 4 Visit lifecycle | Claude Code | Antigravity | Not started |
 | 5 Photos | Claude Code (storage rules) | Antigravity | Not started |
@@ -23,40 +23,40 @@
 | 7 Android | Claude Code (review) | Antigravity | Not started |
 | 8 Release readiness and cutover | Claude Code (security review) | Antigravity (docs) | Not started |
 
-## Phase 0 Gate — Official Staging Test Output (2026-10-14)
-Script: `scripts/test-phase0-hotfix.sql` — commit `88cd071` — PostgreSQL 17 staging
+## Phase 1 Gate — Official Staging Test Output (2026-10-14)
+Script: `supabase/tests/database_test.sql` — commit `cf49aca` — PostgreSQL 17 staging (Migrations 004–009)
 
 | id | test_name | status | detail |
 |---|---|---|---|
-| 1 | F1: Create visit with prescription path | PASS | Created visit id: df85aced-d4b8-4fc7-842e-6825df3de571 |
-| 2 | F3: Transition visit pending -> final | PASS | Visit updated with receipt and purchase amount |
-| 3 | F3/F4: Anti-tampering (agent_id) | PASS | Trigger prevented agent_id tampering |
-| 4 | F3: Cross-agent update isolation | PASS | Agent 2 update strictly blocked (0 rows updated) |
-| 5 | F4: Deactivated is_active_agent() | PASS | Correctly returned false for deactivated agent |
-| 6 | F4: Deactivated agent read visits | PASS | Deactivated agent sees 0 visits |
-| 7 | F4: Deactivated agent insert visit | PASS | Insert rejected by RLS |
-| 8 | F4: Deactivated agent location RPC | PASS | Blocked with Permission denied error |
-| 9 | F9: audit_visit_changes search_path | PASS | Function has prosecdef=true and search_path=public |
-| 10 | F9: Location merge village collision | PASS | Merged duplicate village names without collision error |
-| 11 | F2: Agent 1 read own legacy & new files | PASS | Able to read both legacy and new path files |
-| 12 | F2: Storage cross-agent isolation | PASS | Agent 2 receives 0 rows for Agent 1 files |
-| 13 | F2/F4: Deactivated storage read | PASS | Deactivated agent reads 0 storage objects |
-| 14 | F2/F4: Deactivated storage upload | PASS | Upload rejected by storage RLS |
-| 15 | TOTAL SUMMARY | PASS | **Passed: 14 \| Failed: 0 \| Total Tests: 14** |
+| 1 | Control: Agent A sees own farmer & visit | PASS | Agent A successfully sees Farmer A and Visit A1 |
+| 2 | Control: Agent completes visit with service | PASS | Visit successfully created, attached service, and completed |
+| 3 | Consent Ledger: Block UPDATE | PASS | Trigger strictly prevented UPDATE |
+| 4 | Consent Ledger: Block DELETE | PASS | Trigger strictly prevented DELETE |
+| 5 | Consent Ledger: Block TRUNCATE | PASS | TRUNCATE operation strictly blocked |
+| 6 | Catalogs: Composite FK product/size | PASS | Verified exact constraint: fk_visit_purchase_product_size |
+| 7 | Visits: One in_progress per agent | PASS | Verified exact unique index: unique_agent_in_progress_visit |
+| 8 | Visits: Non-overlapping time (btree_gist) | PASS | Verified exact exclusion constraint: no_overlapping_agent_visits |
+| 9 | Visits: Completion services validation | PASS | Validation trigger enforced value-added service requirement |
+| 10 | RLS: Agent farmer isolation | PASS | Agent B cannot see Farmer A (0 rows returned) |
+| 11 | RLS: Agent visit isolation | PASS | Agent B cannot see Visit A1 (0 rows returned) |
+| 12 | RLS: Unassignment boundary | PASS | Farmer A became immediately invisible to Agent A upon unassignment |
+| 13 | RLS: client_viewer read permission | PASS | Client viewer successfully read farmer record |
+| 14 | RLS: client_viewer write denial | PASS | Insert rejected by RLS for client_viewer |
+| 15 | RLS: Anonymous lockdown | PASS | Anon user sees 0 rows across farmers, farm_visits, and app_config |
+| 16 | RLS: consent_otps locked to service_role | PASS | consent_otps strictly denied for agent, viewer, and admin |
+| 17 | Anti-tampering: Block agent_id change | PASS | Strictly prevented changing agent_id |
+| 18 | Anti-tampering: Block farmer_id change | PASS | Strictly prevented changing farmer_id |
+| 19 | RLS: Deactivated agent isolation | PASS | Deactivated agent blocked on farmers, farm_visits, and visit-photos |
+| 20 | TOTAL SUMMARY | PASS | **Passed: 19 \| Failed: 0 \| Total Tests: 19** |
 
-## Next step — Phase 1 Staging Rehearsal & Gate 1 Review
-Run migrations `004` to `008` **in order** in the Staging SQL Editor, pasting each result. Then run `supabase/tests/database_test.sql`.
-
-1. `supabase/migrations/004_v2_roles_and_config.sql` — `client_viewer` role, `must_change_password`, `app_config`, `audit_log`
-2. `supabase/migrations/005_v2_tables.sql` — `farmers`, `farmer_assignments`, `consent_otps`, `farmer_consents`, catalogs, `crop_cycles`, `farm_visits`, child tables (**never touches legacy `visits`**)
-3. `supabase/migrations/006_v2_constraints_and_triggers.sql` — `btree_gist` non-overlapping constraint, append-only consent trigger, farmer code sequence, completion validation
-4. `supabase/migrations/007_v2_rls_and_storage.sql` — RLS policies, private `visit-photos` bucket, reporting views (`farm_visits_full`, `farmers_full`)
-5. `supabase/migrations/008_v2_seed_catalogs.sql` — exact services seed, placeholder crops, stages, products, and sizes
-6. `supabase/tests/database_test.sql` — Phase 1 database test suite (same format: 15-row grid)
-
-Present Gate 1 review output for Owner sign-off before starting Phase 2.
-
-**Rule reminder**: Do not push to remote `v2` until Vercel Preview environment variables point to staging. Do not apply anything to production.
+## Next step — Phase 2: Admin Basics
+1. Claude Code implements Backend Slice for Phase 2:
+   - Admin APIs / Edge functions for agent account management (create agent, force password change, toggle active).
+   - Location management RPCs & merge audit.
+   - Catalog management functions (crops, stages, products, pack sizes, services).
+2. Antigravity implements Frontend Slice for Phase 2:
+   - Admin UI screens for agent management, locations, and catalog editors.
+3. **Rule reminder**: Do not push to remote `v2` until Vercel Preview environment variables point to staging. Do not apply anything to production.
 
 ## Gotchas and notes
 - **`.claude/settings.json` (shipped in the handoff pack) denies `Read(.env)`, `Read(.env.local)`, `Read(.env.staging.local)`, `Read(.env.production)`, `Read(.env.production.local)`, `Read(supabase/.temp/**)`.** These are enforced at the harness level.
