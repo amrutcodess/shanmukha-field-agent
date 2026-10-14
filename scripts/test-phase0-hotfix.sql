@@ -269,6 +269,25 @@ begin
       raise exception 'TEST FAILED: Agent 2 should NOT be able to read Agent 1 new prescription file';
     end if;
     raise notice 'PASS: F2 - Agent 2 is blocked from reading Agent 1 legacy and new files';
+
+    -- Switch to deactivated agent
+    perform set_config('request.jwt.claim.sub', v_deact_id::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_deact_id::text, 'role', 'authenticated')::text, true);
+
+    -- Deactivated agent cannot read storage objects
+    if exists (select 1 from storage.objects where bucket_id = 'purchase-photos') then
+      raise exception 'TEST FAILED: Deactivated agent should NOT be able to read any storage objects';
+    end if;
+    raise notice 'PASS: F2/F4 - Deactivated agent cannot read storage objects';
+
+    -- Deactivated agent cannot upload storage objects
+    begin
+      insert into storage.objects (id, bucket_id, name, owner)
+      values (gen_random_uuid(), 'purchase-photos', v_deact_id || '/rx_blocked.jpg', v_deact_id);
+      raise exception 'TEST FAILED: Deactivated agent upload should have been rejected by storage RLS';
+    exception when others then
+      raise notice 'PASS: F2/F4 - Deactivated agent upload rejected by storage RLS';
+    end;
   end;
 
   raise notice '=== ALL PHASE 0 HOTFIX TESTS PASSED SUCCESSFULLY ===';

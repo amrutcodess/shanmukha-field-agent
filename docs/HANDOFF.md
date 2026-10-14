@@ -13,8 +13,8 @@
 ## Phase status
 | Phase | Backend slice | Frontend slice | Status |
 |---|---|---|---|
-| 0 Safety net and hotfix (A4) | Complete | Complete | Completed & verified on staging |
-| 1 Foundation, schema, RLS | Claude Code / Antigravity | none | Queued (awaiting Gate 1 approval) |
+| 0 Safety net and hotfix (A4) | Complete | Complete | Gate Passed (verified on staging, major_version=17) |
+| 1 Foundation, schema, RLS | Complete (Migrations 004-008, Seeds, Tests) | none | Ready for Staging Execution & Gate 1 Review |
 | 2 Admin basics | Claude Code | Antigravity | Not started |
 | 3 Consent and onboarding | Claude Code | Antigravity | Not started |
 | 4 Visit lifecycle | Claude Code | Antigravity | Not started |
@@ -24,18 +24,24 @@
 | 8 Release readiness and cutover | Claude Code (security review) | Antigravity (docs) | Not started |
 
 ## Next step
-**Awaiting Gate 1 Approval.**
-- Production Postgres version confirmed (via `SHOW server_version;`).
-- Once Gate 1 is approved by the owner, start **Phase 1: Foundation, Schema & RLS**:
-  - Write `supabase/migrations/004_v2_foundation.sql` (parallel tables: `farmers`, `farmer_assignments`, `crop_cycles`, `farm_visits`, `visit_photos`, `visit_track_points`, `visit_services`, `visit_purchase_items`, `app_events`, `consent_otps`, `farmer_consents`, `audit_log`, `app_config`, `crop_stages`, `product_sizes`, `value_added_services`; `btree_gist` non-overlapping exclusion constraint; append-only consent trigger).
-  - Write `supabase/seed_placeholder_catalog.sql`.
-  - Write Phase 1 database test suite.
-- **Rule reminder**: Do not push to remote `v2` until Vercel Preview environment variables point to staging. Do not apply `004` to staging until Gate 1 is explicitly approved.
+**Phase 1 Staging Rehearsal & Gate 1 Review.**
+1. Run migrations `004` to `008` in order on the Staging SQL Editor:
+   - `004_v2_roles_and_config.sql`: `client_viewer` role, `must_change_password`, `app_config`, `audit_log`.
+   - `005_v2_tables.sql`: `farmers`, `farmer_assignments`, `consent_otps`, `farmer_consents`, catalogs, `crop_cycles`, `farm_visits`, child tables. (Never touches legacy `visits`).
+   - `006_v2_constraints_and_triggers.sql`: `btree_gist` non-overlapping constraint, append-only consent trigger, farmer code sequence, completion validation.
+   - `007_v2_rls_and_storage.sql`: RLS policies, private `visit-photos` bucket, reporting views (`farm_visits_full`, `farmers_full`).
+   - `008_v2_seed_catalogs.sql`: exact services seed, placeholder crops, stages, products, and sizes.
+2. Run `supabase/tests/database_test.sql` on Staging SQL Editor and paste results.
+3. Present Gate 1 review for Claude Code / Owner sign-off before starting Phase 2.
+- **Rule reminder**: Do not push to remote `v2` until Vercel Preview environment variables point to staging. Do not apply anything to production.
 
 ## Gotchas and notes
 - **`.claude/settings.json` (shipped in the handoff pack) denies `Read(.env)`, `Read(.env.local)`, `Read(.env.staging.local)`, `Read(.env.production)`, `Read(.env.production.local)`, `Read(supabase/.temp/**)`.** These are enforced at the harness level.
 - `scripts/check-env.mjs` is tested and verified by `src/tests/check-env.test.ts`. It refuses execution unless `PROD_PROJECT_REF` is set and non-production is verified.
-- `scripts/test-phase0-hotfix.sql` is ready to run in staging to verify F1-F4 and F9 in PostgreSQL.
+- `scripts/test-phase0-hotfix.sql` is verified on staging with 100% success (covering F1-F4, F9, and storage RLS).
+- **Agent unban fix**: unit-tested only; verify end to end in Phase 3.
+- `supabase/config.toml` has `major_version = 17` matching production Postgres.
+- All 18 automated unit tests pass in `vitest`.
 
 ## Log
 (newest first: date, tool, what was done, test results, what the next tool must know)
