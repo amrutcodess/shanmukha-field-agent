@@ -19,6 +19,7 @@ alter table test_results enable row level security;
 drop policy if exists "test_results_open" on test_results;
 create policy "test_results_open" on test_results for all using (true) with check (true);
 grant all on test_results to authenticated;
+grant usage, select on sequence test_results_id_seq to authenticated;
 truncate test_results;
 
 do $$
