@@ -18,6 +18,7 @@ create temp table if not exists test_results (
 alter table test_results enable row level security;
 drop policy if exists "test_results_open" on test_results;
 create policy "test_results_open" on test_results for all using (true) with check (true);
+grant all on test_results to authenticated;
 truncate test_results;
 
 do $$
