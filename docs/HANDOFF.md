@@ -4,17 +4,17 @@
 - `npx tsc -b` passes. `npx vitest run`: 8 tests in 3 files pass. `npx vite build` passes (single 747 kB chunk). `npx oxlint`: warnings only.
 - Production database has only `001_init.sql` in the repo, but production may have drifted (see defect F1 in `docs/MASTER_PROMPT.md`, section A3). Not yet audited.
 
-## Owner decisions still needed (the project owner will answer)
-- [ ] Is the live v1 app being used by real agents right now?
-- [ ] Does the production database hold real farmer data or test data?
-- [ ] Staging Supabase project created and keys placed in `.env.staging.local`?
-- [ ] Vercel "Preview" environment variables point to staging (not production)?
+## Owner decisions confirmed (2026-10-14)
+- [x] Is the live v1 app being used by real agents right now? **NO** (No live field use; hotfix stays on staging and ships with v2 at cutover).
+- [x] Does the production database hold real farmer data or test data? **TEST ONLY** (Agent `harish001` is the owner's test account).
+- [x] Staging Supabase project created? **YES** (Ref: `yexfigoxljwerignwvoj`). Migrations 001-003 applied and verified via `scripts/test-phase0-hotfix.sql`.
+- [ ] Vercel "Preview" environment variables point to staging (not production)? Awaiting owner confirmation before any push to remote `v2`.
 
 ## Phase status
 | Phase | Backend slice | Frontend slice | Status |
 |---|---|---|---|
-| 0 Safety net and hotfix (A4) | Complete | Complete | Completed (all 7 items done, tests pass, ready for owner gate review) |
-| 1 Foundation, schema, RLS | In preparation | none | Ready to start |
+| 0 Safety net and hotfix (A4) | Complete | Complete | Completed & verified on staging |
+| 1 Foundation, schema, RLS | Claude Code / Antigravity | none | Queued (awaiting Gate 1 approval) |
 | 2 Admin basics | Claude Code | Antigravity | Not started |
 | 3 Consent and onboarding | Claude Code | Antigravity | Not started |
 | 4 Visit lifecycle | Claude Code | Antigravity | Not started |
@@ -24,12 +24,13 @@
 | 8 Release readiness and cutover | Claude Code (security review) | Antigravity (docs) | Not started |
 
 ## Next step
-**Phase 0 Gate Review with Owner.**
-- Report Phase 0 completion and drift findings.
-- Owner questions to answer:
-  1. Is the live v1 app being used by real agents right now? (Determines if hotfix `003_hotfix_v1.sql` should be deployed to production immediately, or applied during cutover).
-  2. Does the production database hold real farmer data or test data?
-  3. Is the staging Supabase project linked and ready for Phase 1 migrations?
+**Awaiting Gate 1 Approval.**
+- Production Postgres version confirmed (via `SHOW server_version;`).
+- Once Gate 1 is approved by the owner, start **Phase 1: Foundation, Schema & RLS**:
+  - Write `supabase/migrations/004_v2_foundation.sql` (parallel tables: `farmers`, `farmer_assignments`, `crop_cycles`, `farm_visits`, `visit_photos`, `visit_track_points`, `visit_services`, `visit_purchase_items`, `app_events`, `consent_otps`, `farmer_consents`, `audit_log`, `app_config`, `crop_stages`, `product_sizes`, `value_added_services`; `btree_gist` non-overlapping exclusion constraint; append-only consent trigger).
+  - Write `supabase/seed_placeholder_catalog.sql`.
+  - Write Phase 1 database test suite.
+- **Rule reminder**: Do not push to remote `v2` until Vercel Preview environment variables point to staging. Do not apply `004` to staging until Gate 1 is explicitly approved.
 
 ## Gotchas and notes
 - **`.claude/settings.json` (shipped in the handoff pack) denies `Read(.env)`, `Read(.env.local)`, `Read(.env.staging.local)`, `Read(.env.production)`, `Read(.env.production.local)`, `Read(supabase/.temp/**)`.** These are enforced at the harness level.
