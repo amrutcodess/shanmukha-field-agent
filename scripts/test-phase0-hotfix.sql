@@ -55,6 +55,11 @@ begin
     role = excluded.role,
     is_active = excluded.is_active;
 
+  -- Set auth context to admin for initial location and catalog setup
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claim.sub', v_admin_id::text, true);
+  perform set_config('request.jwt.claims', json_build_object('sub', v_admin_id::text, 'role', 'authenticated')::text, true);
+
   -- Create dummy location & crop
   select village_id, district_id, region_id into v_vil_id, v_dist_id, v_reg_id
   from public.get_or_create_location('Test Region', 'Test District', 'Test Village');
