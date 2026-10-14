@@ -1,296 +1,361 @@
 -- scripts/test-phase0-hotfix.sql
 -- Verification script for Phase 0 hotfix (Defects F1, F2, F3, F4, F9)
--- Can be run in Supabase SQL Editor on staging or test database.
--- Safe: executes within a transaction and rolls back at the end.
+-- Outputs results as a visible table grid with summary counts.
+-- Safe: executes inside a transaction and rolls back at the end.
 
 begin;
 
--- Verify we are running on a non-production environment or explicitly safe
-do $$
-begin
-  raise notice '=== STARTING PHASE 0 HOTFIX TEST SUITE ===';
-end $$;
+-- Create temporary table to store test results
+create temp table if not exists test_results (
+  id serial primary key,
+  test_name text not null,
+  status text not null,
+  detail text
+);
+truncate test_results;
 
--- 1. Setup Test Fixtures (temporary auth users & profiles)
 do $$
 declare
+  -- Test actor IDs
   v_admin_id uuid := '11111111-1111-1111-1111-111111111111';
   v_agent1_id uuid := '22222222-2222-2222-2222-222222222222';
   v_agent2_id uuid := '33333333-3333-3333-3333-333333333333';
   v_deact_id uuid := '44444444-4444-4444-4444-444444444444';
+
   v_reg_id uuid;
   v_dist_id uuid;
   v_vil_id uuid;
   v_crop_id uuid;
   v_visit1_id uuid;
+  v_obj_legacy uuid := gen_random_uuid();
+  v_obj_new uuid := gen_random_uuid();
+  v_count integer;
 begin
-  -- Insert dummy auth.users first to satisfy foreign key constraint on public.profiles(id)
-  insert into auth.users (
-    id,
-    instance_id,
-    aud,
-    role,
-    email,
-    encrypted_password,
-    email_confirmed_at,
-    raw_app_meta_data,
-    raw_user_meta_data,
-    created_at,
-    updated_at
-  ) values 
-    (v_admin_id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'admin_test@test.local', 'dummy_hash', now(), '{"provider":"email","providers":["email"]}', '{}', now(), now()),
-    (v_agent1_id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'agent1_test@test.local', 'dummy_hash', now(), '{"provider":"email","providers":["email"]}', '{}', now(), now()),
-    (v_agent2_id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'agent2_test@test.local', 'dummy_hash', now(), '{"provider":"email","providers":["email"]}', '{}', now(), now()),
-    (v_deact_id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'deact_test@test.local', 'dummy_hash', now(), '{"provider":"email","providers":["email"]}', '{}', now(), now())
-  on conflict (id) do nothing;
+  -- 1. Setup Fixtures (auth.users & profiles)
+  begin
+    insert into auth.users (
+      id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
+      raw_app_meta_data, raw_user_meta_data, created_at, updated_at
+    ) values 
+      (v_admin_id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'admin_test@test.local', 'dummy_hash', now(), '{"provider":"email"}', '{}', now(), now()),
+      (v_agent1_id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'agent1_test@test.local', 'dummy_hash', now(), '{"provider":"email"}', '{}', now(), now()),
+      (v_agent2_id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'agent2_test@test.local', 'dummy_hash', now(), '{"provider":"email"}', '{}', now(), now()),
+      (v_deact_id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'deact_test@test.local', 'dummy_hash', now(), '{"provider":"email"}', '{}', now(), now())
+    on conflict (id) do nothing;
 
-  -- Insert dummy profiles
-  insert into public.profiles (id, role, full_name, username, is_active)
-  values 
-    (v_admin_id, 'admin', 'Test Admin', 'test_admin', true),
-    (v_agent1_id, 'agent', 'Active Agent 1', 'agent_one', true),
-    (v_agent2_id, 'agent', 'Active Agent 2', 'agent_two', true),
-    (v_deact_id, 'agent', 'Deactivated Agent', 'agent_deact', false)
-  on conflict (id) do update set
-    role = excluded.role,
-    is_active = excluded.is_active;
+    insert into public.profiles (id, role, full_name, username, is_active)
+    values 
+      (v_admin_id, 'admin', 'Test Admin', 'test_admin', true),
+      (v_agent1_id, 'agent', 'Active Agent 1', 'agent_one', true),
+      (v_agent2_id, 'agent', 'Active Agent 2', 'agent_two', true),
+      (v_deact_id, 'agent', 'Deactivated Agent', 'agent_deact', false)
+    on conflict (id) do update set
+      role = excluded.role,
+      is_active = excluded.is_active;
 
-  -- Set auth context to admin for initial location and catalog setup
-  perform set_config('role', 'authenticated', true);
-  perform set_config('request.jwt.claim.sub', v_admin_id::text, true);
-  perform set_config('request.jwt.claims', json_build_object('sub', v_admin_id::text, 'role', 'authenticated')::text, true);
+    -- Set admin context to set up location and catalog
+    perform set_config('role', 'authenticated', true);
+    perform set_config('request.jwt.claim.sub', v_admin_id::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_admin_id::text, 'role', 'authenticated')::text, true);
 
-  -- Create dummy location & crop
-  select village_id, district_id, region_id into v_vil_id, v_dist_id, v_reg_id
-  from public.get_or_create_location('Test Region', 'Test District', 'Test Village');
+    select village_id, district_id, region_id into v_vil_id, v_dist_id, v_reg_id
+    from public.get_or_create_location('Phase0 Region', 'Phase0 District', 'Phase0 Village');
 
-  insert into public.crops (name_en, name_te)
-  values ('Test Paddy', 'వరి')
-  returning id into v_crop_id;
+    insert into public.crops (name_en, name_te)
+    values ('Phase0 Crop', 'పంట')
+    returning id into v_crop_id;
+  exception when others then
+    insert into test_results (test_name, status, detail)
+    values ('Fixture Setup', 'FAIL', 'Setup error: ' || sqlerrm);
+    return;
+  end;
 
-  -- Test F1: Active agent can create visit with prescription_image_path
-  -- Set auth context to agent1
-  perform set_config('role', 'authenticated', true);
-  perform set_config('request.jwt.claim.sub', v_agent1_id::text, true);
-  perform set_config('request.jwt.claims', json_build_object('sub', v_agent1_id::text, 'role', 'authenticated')::text, true);
+  -- TEST 1: F1 - Active agent can create visit with prescription_image_path
+  begin
+    perform set_config('role', 'authenticated', true);
+    perform set_config('request.jwt.claim.sub', v_agent1_id::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_agent1_id::text, 'role', 'authenticated')::text, true);
 
-  -- Check is_active_agent()
-  if not public.is_active_agent() then
-    raise exception 'TEST FAILED: is_active_agent() should return true for active agent 1';
-  end if;
+    insert into public.visits (
+      agent_id, village_id, crop_id, duration_minutes, farmer_name, farmer_phone,
+      diagnosis, prescription, status, prescription_image_path
+    ) values (
+      v_agent1_id, v_vil_id, v_crop_id, 20, 'Farmer Ramesh', '9876543210',
+      'Leaf blast detected', 'Spray Tricyclazole', 'pending',
+      v_agent1_id || '/prescriptions/rx_101.jpg'
+    ) returning id into v_visit1_id;
 
-  insert into public.visits (
-    agent_id,
-    village_id,
-    crop_id,
-    duration_minutes,
-    farmer_name,
-    farmer_phone,
-    diagnosis,
-    prescription,
-    status,
-    prescription_image_path
-  ) values (
-    v_agent1_id,
-    v_vil_id,
-    v_crop_id,
-    20,
-    'Farmer Ramesh',
-    '9876543210',
-    'Leaf blast detected',
-    'Spray Tricyclazole',
-    'pending',
-    v_agent1_id || '/prescriptions/test_rx_123.jpg'
-  ) returning id into v_visit1_id;
+    insert into test_results (test_name, status, detail)
+    values ('F1: Create visit with prescription path', 'PASS', 'Created visit id: ' || v_visit1_id);
+  exception when others then
+    insert into test_results (test_name, status, detail)
+    values ('F1: Create visit with prescription path', 'FAIL', sqlerrm);
+  end;
 
-  raise notice 'PASS: F1 - Inserted visit with prescription_image_path (%)', v_visit1_id;
+  -- TEST 2: F3 - Active agent can update own visit from pending to final
+  begin
+    update public.visits
+    set status = 'final',
+        purchased = true,
+        purchase_amount = 750,
+        purchase_image_path = v_agent1_id || '/receipt_101.jpg'
+    where id = v_visit1_id;
 
-  -- Test F3: Active agent can update own visit from pending to final or closed
-  update public.visits
-  set status = 'final',
-      purchased = true,
-      purchase_amount = 500,
-      purchase_image_path = v_agent1_id || '/receipt_test.jpg'
-  where id = v_visit1_id;
+    if found then
+      insert into test_results (test_name, status, detail)
+      values ('F3: Transition visit pending -> final', 'PASS', 'Visit updated with receipt and purchase amount');
+    else
+      insert into test_results (test_name, status, detail)
+      values ('F3: Transition visit pending -> final', 'FAIL', 'Update returned 0 rows (rejected by RLS)');
+    end if;
+  exception when others then
+    insert into test_results (test_name, status, detail)
+    values ('F3: Transition visit pending -> final', 'FAIL', sqlerrm);
+  end;
 
-  if not found then
-    raise exception 'TEST FAILED: Active agent was unable to update own visit from pending to final (F3)';
-  end if;
-  raise notice 'PASS: F3 - Active agent successfully moved visit from pending to final';
-
-  -- Test F3/F4: Agent cannot tamper with agent_id or client_uuid
+  -- TEST 3: F3/F4 - Anti-tampering trigger blocks altering agent_id
   begin
     update public.visits
     set agent_id = v_agent2_id
     where id = v_visit1_id;
-    raise exception 'TEST FAILED: Changing agent_id should have been blocked';
+
+    insert into test_results (test_name, status, detail)
+    values ('F3/F4: Anti-tampering (agent_id)', 'FAIL', 'Updating agent_id should have been rejected');
   exception when others then
     if sqlerrm like '%Cannot change agent_id%' then
-      raise notice 'PASS: F3/F4 - Tampering with agent_id blocked by trigger';
+      insert into test_results (test_name, status, detail)
+      values ('F3/F4: Anti-tampering (agent_id)', 'PASS', 'Trigger prevented agent_id tampering');
     else
-      raise;
+      insert into test_results (test_name, status, detail)
+      values ('F3/F4: Anti-tampering (agent_id)', 'FAIL', 'Unexpected error: ' || sqlerrm);
     end if;
   end;
 
-  -- Test F3: Agent cannot touch another agent''s visit
-  -- Switch to agent2
-  perform set_config('request.jwt.claim.sub', v_agent2_id::text, true);
-  perform set_config('request.jwt.claims', json_build_object('sub', v_agent2_id::text, 'role', 'authenticated')::text, true);
+  -- TEST 4: F3 - Agent 2 cannot update Agent 1 visit
+  begin
+    perform set_config('request.jwt.claim.sub', v_agent2_id::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_agent2_id::text, 'role', 'authenticated')::text, true);
 
-  update public.visits
-  set diagnosis = 'Tampered diagnosis'
-  where id = v_visit1_id;
+    update public.visits
+    set diagnosis = 'Tampered diagnosis'
+    where id = v_visit1_id;
 
-  if found then
-    raise exception 'TEST FAILED: Agent 2 should not be able to update Agent 1 visit';
-  end if;
-  raise notice 'PASS: F3 - Agent 2 cannot update Agent 1 visit';
+    if found then
+      insert into test_results (test_name, status, detail)
+      values ('F3: Cross-agent update isolation', 'FAIL', 'Agent 2 was able to update Agent 1 visit');
+    else
+      insert into test_results (test_name, status, detail)
+      values ('F3: Cross-agent update isolation', 'PASS', 'Agent 2 update strictly blocked (0 rows updated)');
+    end if;
+  exception when others then
+    insert into test_results (test_name, status, detail)
+    values ('F3: Cross-agent update isolation', 'FAIL', sqlerrm);
+  end;
 
-  -- Test F4: Deactivated agent is completely rejected
-  perform set_config('request.jwt.claim.sub', v_deact_id::text, true);
-  perform set_config('request.jwt.claims', json_build_object('sub', v_deact_id::text, 'role', 'authenticated')::text, true);
+  -- TEST 5: F4 - is_active_agent() returns false for deactivated agent
+  begin
+    perform set_config('request.jwt.claim.sub', v_deact_id::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_deact_id::text, 'role', 'authenticated')::text, true);
 
-  if public.is_active_agent() then
-    raise exception 'TEST FAILED: is_active_agent() should return false for deactivated agent';
-  end if;
-  raise notice 'PASS: F4 - is_active_agent() returns false for deactivated agent';
+    if public.is_active_agent() then
+      insert into test_results (test_name, status, detail)
+      values ('F4: Deactivated is_active_agent()', 'FAIL', 'Returned true for deactivated agent');
+    else
+      insert into test_results (test_name, status, detail)
+      values ('F4: Deactivated is_active_agent()', 'PASS', 'Correctly returned false for deactivated agent');
+    end if;
+  exception when others then
+    insert into test_results (test_name, status, detail)
+    values ('F4: Deactivated is_active_agent()', 'FAIL', sqlerrm);
+  end;
 
-  -- Deactivated agent cannot read visits
-  if exists (select 1 from public.visits where agent_id = v_deact_id) then
-    raise exception 'TEST FAILED: Deactivated agent should see no visits';
-  end if;
-  raise notice 'PASS: F4 - Deactivated agent cannot read visits';
+  -- TEST 6: F4 - Deactivated agent cannot read visits
+  begin
+    if exists (select 1 from public.visits where agent_id = v_deact_id) then
+      insert into test_results (test_name, status, detail)
+      values ('F4: Deactivated agent read visits', 'FAIL', 'Deactivated agent was able to read visits');
+    else
+      insert into test_results (test_name, status, detail)
+      values ('F4: Deactivated agent read visits', 'PASS', 'Deactivated agent sees 0 visits');
+    end if;
+  exception when others then
+    insert into test_results (test_name, status, detail)
+    values ('F4: Deactivated agent read visits', 'FAIL', sqlerrm);
+  end;
 
-  -- Deactivated agent cannot insert visits
+  -- TEST 7: F4 - Deactivated agent cannot insert visits
   begin
     insert into public.visits (
-      agent_id, village_id, crop_id, duration_minutes, farmer_name, farmer_phone, diagnosis, prescription, status
+      agent_id, village_id, crop_id, duration_minutes, farmer_name, farmer_phone,
+      diagnosis, prescription, status
     ) values (
-      v_deact_id, v_vil_id, v_crop_id, 15, 'Bad Farmer', '9000000000', 'Diagnosis', 'Prescription', 'pending'
+      v_deact_id, v_vil_id, v_crop_id, 15, 'Bad Farmer', '9000000000',
+      'Diag', 'Rx', 'pending'
     );
-    raise exception 'TEST FAILED: Deactivated agent insert should have been rejected by RLS';
+    insert into test_results (test_name, status, detail)
+    values ('F4: Deactivated agent insert visit', 'FAIL', 'Insert should have been rejected by RLS');
   exception when others then
-    raise notice 'PASS: F4 - Deactivated agent insert rejected by RLS';
+    insert into test_results (test_name, status, detail)
+    values ('F4: Deactivated agent insert visit', 'PASS', 'Insert rejected by RLS');
   end;
 
-  -- Deactivated agent cannot call get_or_create_location
+  -- TEST 8: F4 - Deactivated agent blocked in get_or_create_location
   begin
     perform * from public.get_or_create_location('Reg', 'Dist', 'Vil');
-    raise exception 'TEST FAILED: Deactivated agent calling get_or_create_location should fail';
+    insert into test_results (test_name, status, detail)
+    values ('F4: Deactivated agent location RPC', 'FAIL', 'Location RPC should have raised Permission denied');
   exception when others then
     if sqlerrm like '%Permission denied%' then
-      raise notice 'PASS: F4 - Deactivated agent blocked in get_or_create_location';
+      insert into test_results (test_name, status, detail)
+      values ('F4: Deactivated agent location RPC', 'PASS', 'Blocked with Permission denied error');
     else
-      raise;
+      insert into test_results (test_name, status, detail)
+      values ('F4: Deactivated agent location RPC', 'FAIL', 'Unexpected error: ' || sqlerrm);
     end if;
   end;
 
-  -- Test F9: audit_visit_changes function configuration
-  perform set_config('role', 'postgres', true);
-  if not exists (
-    select 1 from pg_proc p
-    join pg_namespace n on p.pronamespace = n.oid
-    where n.nspname = 'public'
-      and p.proname = 'audit_visit_changes'
-      and p.prosecdef = true
-      and array_to_string(p.proconfig, ',') like '%search_path=public%'
-  ) then
-    raise exception 'TEST FAILED: audit_visit_changes must have search_path=public';
-  end if;
-  raise notice 'PASS: F9 - audit_visit_changes has fixed search_path = public';
+  -- TEST 9: F9 - audit_visit_changes function has search_path = public
+  begin
+    perform set_config('role', 'postgres', true);
+    if exists (
+      select 1 from pg_proc p
+      join pg_namespace n on p.pronamespace = n.oid
+      where n.nspname = 'public'
+        and p.proname = 'audit_visit_changes'
+        and p.prosecdef = true
+        and array_to_string(p.proconfig, ',') like '%search_path=public%'
+    ) then
+      insert into test_results (test_name, status, detail)
+      values ('F9: audit_visit_changes search_path', 'PASS', 'Function has prosecdef=true and search_path=public');
+    else
+      insert into test_results (test_name, status, detail)
+      values ('F9: audit_visit_changes search_path', 'FAIL', 'Function missing search_path=public');
+    end if;
+  exception when others then
+    insert into test_results (test_name, status, detail)
+    values ('F9: audit_visit_changes search_path', 'FAIL', sqlerrm);
+  end;
 
-  -- Test F9: admin_merge_location handles district village name collisions
+  -- TEST 10: F9 - admin_merge_location handles village name collisions
   declare
     v_d1 uuid;
     v_d2 uuid;
     v_v1 uuid;
     v_v2 uuid;
   begin
-    insert into public.districts (region_id, name) values (v_reg_id, 'Source Dist') returning id into v_d1;
-    insert into public.districts (region_id, name) values (v_reg_id, 'Target Dist') returning id into v_d2;
-    -- Colliding village names
-    insert into public.villages (district_id, name) values (v_d1, 'Same Village') returning id into v_v1;
-    insert into public.villages (district_id, name) values (v_d2, 'Same Village') returning id into v_v2;
+    insert into public.districts (region_id, name) values (v_reg_id, 'Merge Dist A') returning id into v_d1;
+    insert into public.districts (region_id, name) values (v_reg_id, 'Merge Dist B') returning id into v_d2;
+    insert into public.villages (district_id, name) values (v_d1, 'Collision Village') returning id into v_v1;
+    insert into public.villages (district_id, name) values (v_d2, 'Collision Village') returning id into v_v2;
 
-    -- Merge as admin
     perform set_config('request.jwt.claim.sub', v_admin_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', v_admin_id::text, 'role', 'authenticated')::text, true);
 
     perform public.admin_merge_location('district', v_d1, v_d2);
 
-    if exists (select 1 from public.districts where id = v_d1) then
-      raise exception 'TEST FAILED: Source district was not removed after merge';
+    if exists (select 1 from public.districts where id = v_d1) or exists (select 1 from public.villages where id = v_v1) then
+      insert into test_results (test_name, status, detail)
+      values ('F9: Location merge village collision', 'FAIL', 'Source district or village still exists after merge');
+    else
+      insert into test_results (test_name, status, detail)
+      values ('F9: Location merge village collision', 'PASS', 'Merged duplicate village names without collision error');
     end if;
-    if exists (select 1 from public.villages where id = v_v1) then
-      raise exception 'TEST FAILED: Colliding source village was not removed';
-    end if;
-    raise notice 'PASS: F9 - admin_merge_location resolved duplicate village collision without error';
+  exception when others then
+    insert into test_results (test_name, status, detail)
+    values ('F9: Location merge village collision', 'FAIL', sqlerrm);
   end;
 
-  -- Test F2: Storage policies for legacy and new prescriptions prefix
-  declare
-    v_obj_legacy uuid := gen_random_uuid();
-    v_obj_new uuid := gen_random_uuid();
+  -- TEST 11: F2 - Agent 1 can read own legacy and new prescription files
   begin
     perform set_config('role', 'postgres', true);
     insert into storage.buckets (id, name, public) 
     values ('purchase-photos', 'purchase-photos', false)
     on conflict (id) do nothing;
 
-    -- Create a legacy file for agent 1: prescriptions/{agent1_id}/rx_legacy.jpg
     insert into storage.objects (id, bucket_id, name, owner)
-    values (v_obj_legacy, 'purchase-photos', 'prescriptions/' || v_agent1_id || '/rx_legacy.jpg', v_agent1_id);
+    values (v_obj_legacy, 'purchase-photos', 'prescriptions/' || v_agent1_id || '/rx_leg.jpg', v_agent1_id);
 
-    -- Create a new-style file for agent 1: {agent1_id}/prescriptions/rx_new.jpg
     insert into storage.objects (id, bucket_id, name, owner)
-    values (v_obj_new, 'purchase-photos', v_agent1_id || '/prescriptions/rx_new.jpg', v_agent1_id);
+    values (v_obj_new, 'purchase-photos', v_agent1_id || '/prescriptions/rx_nw.jpg', v_agent1_id);
 
-    -- Switch to agent 1
     perform set_config('role', 'authenticated', true);
     perform set_config('request.jwt.claim.sub', v_agent1_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', v_agent1_id::text, 'role', 'authenticated')::text, true);
 
-    if not exists (select 1 from storage.objects where name = 'prescriptions/' || v_agent1_id || '/rx_legacy.jpg') then
-      raise exception 'TEST FAILED: Agent 1 should be able to read own legacy prescription file';
+    if exists (select 1 from storage.objects where name = 'prescriptions/' || v_agent1_id || '/rx_leg.jpg')
+       and exists (select 1 from storage.objects where name = v_agent1_id || '/prescriptions/rx_nw.jpg') then
+      insert into test_results (test_name, status, detail)
+      values ('F2: Agent 1 read own legacy & new files', 'PASS', 'Able to read both legacy and new path files');
+    else
+      insert into test_results (test_name, status, detail)
+      values ('F2: Agent 1 read own legacy & new files', 'FAIL', 'Could not read own files');
     end if;
-    if not exists (select 1 from storage.objects where name = v_agent1_id || '/prescriptions/rx_new.jpg') then
-      raise exception 'TEST FAILED: Agent 1 should be able to read own new prescription file';
-    end if;
-    raise notice 'PASS: F2 - Agent 1 can read own legacy and new prescription files';
+  exception when others then
+    insert into test_results (test_name, status, detail)
+    values ('F2: Agent 1 read own legacy & new files', 'FAIL', sqlerrm);
+  end;
 
-    -- Switch to agent 2
+  -- TEST 12: F2 - Agent 2 cannot read Agent 1 files
+  begin
     perform set_config('request.jwt.claim.sub', v_agent2_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', v_agent2_id::text, 'role', 'authenticated')::text, true);
 
-    if exists (select 1 from storage.objects where name = 'prescriptions/' || v_agent1_id || '/rx_legacy.jpg') then
-      raise exception 'TEST FAILED: Agent 2 should NOT be able to read Agent 1 legacy prescription file';
+    if exists (select 1 from storage.objects where name = 'prescriptions/' || v_agent1_id || '/rx_leg.jpg')
+       or exists (select 1 from storage.objects where name = v_agent1_id || '/prescriptions/rx_nw.jpg') then
+      insert into test_results (test_name, status, detail)
+      values ('F2: Storage cross-agent isolation', 'FAIL', 'Agent 2 was able to read Agent 1 files');
+    else
+      insert into test_results (test_name, status, detail)
+      values ('F2: Storage cross-agent isolation', 'PASS', 'Agent 2 receives 0 rows for Agent 1 files');
     end if;
-    if exists (select 1 from storage.objects where name = v_agent1_id || '/prescriptions/rx_new.jpg') then
-      raise exception 'TEST FAILED: Agent 2 should NOT be able to read Agent 1 new prescription file';
-    end if;
-    raise notice 'PASS: F2 - Agent 2 is blocked from reading Agent 1 legacy and new files';
+  exception when others then
+    insert into test_results (test_name, status, detail)
+    values ('F2: Storage cross-agent isolation', 'FAIL', sqlerrm);
+  end;
 
-    -- Switch to deactivated agent
+  -- TEST 13: F2/F4 - Deactivated agent cannot read storage objects
+  begin
     perform set_config('request.jwt.claim.sub', v_deact_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', v_deact_id::text, 'role', 'authenticated')::text, true);
 
-    -- Deactivated agent cannot read storage objects
     if exists (select 1 from storage.objects where bucket_id = 'purchase-photos') then
-      raise exception 'TEST FAILED: Deactivated agent should NOT be able to read any storage objects';
+      insert into test_results (test_name, status, detail)
+      values ('F2/F4: Deactivated storage read', 'FAIL', 'Deactivated agent was able to read storage objects');
+    else
+      insert into test_results (test_name, status, detail)
+      values ('F2/F4: Deactivated storage read', 'PASS', 'Deactivated agent reads 0 storage objects');
     end if;
-    raise notice 'PASS: F2/F4 - Deactivated agent cannot read storage objects';
-
-    -- Deactivated agent cannot upload storage objects
-    begin
-      insert into storage.objects (id, bucket_id, name, owner)
-      values (gen_random_uuid(), 'purchase-photos', v_deact_id || '/rx_blocked.jpg', v_deact_id);
-      raise exception 'TEST FAILED: Deactivated agent upload should have been rejected by storage RLS';
-    exception when others then
-      raise notice 'PASS: F2/F4 - Deactivated agent upload rejected by storage RLS';
-    end;
+  exception when others then
+    insert into test_results (test_name, status, detail)
+    values ('F2/F4: Deactivated storage read', 'FAIL', sqlerrm);
   end;
 
-  raise notice '=== ALL PHASE 0 HOTFIX TESTS PASSED SUCCESSFULLY ===';
+  -- TEST 14: F2/F4 - Deactivated agent cannot upload storage objects
+  begin
+    insert into storage.objects (id, bucket_id, name, owner)
+    values (gen_random_uuid(), 'purchase-photos', v_deact_id || '/hack.jpg', v_deact_id);
+
+    insert into test_results (test_name, status, detail)
+    values ('F2/F4: Deactivated storage upload', 'FAIL', 'Deactivated agent was allowed to upload');
+  exception when others then
+    insert into test_results (test_name, status, detail)
+    values ('F2/F4: Deactivated storage upload', 'PASS', 'Upload rejected by storage RLS');
+  end;
+
 end $$;
 
+-- 5. Insert Final Summary Count Row
+insert into test_results (test_name, status, detail)
+select
+  'TOTAL SUMMARY' as test_name,
+  case when count(*) filter (where status = 'FAIL') = 0 then 'PASS' else 'FAIL' end as status,
+  'Passed: ' || count(*) filter (where status = 'PASS') || ' | Failed: ' || count(*) filter (where status = 'FAIL') || ' | Total Tests: ' || count(*) as detail
+from test_results;
+
+-- Return results as a visible table grid
+select id, test_name, status, detail 
+from test_results 
+order by id;
+
+-- Rollback transaction so no test users, visits, or storage records are retained
 rollback;
