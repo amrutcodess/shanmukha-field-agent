@@ -161,7 +161,12 @@ visit_counts as (
           || ' with_deleted_at=' || count(to_jsonb(v) ->> 'deleted_at')
           || ' without_deleted_at=' || (count(*) - count(to_jsonb(v) ->> 'deleted_at'))
           || ' has_deleted_at_column='
-          || (to_jsonb(v) ? 'deleted_at'))::text as detail
+          || (select exists (
+                select 1 from information_schema.columns
+                where table_schema = 'public'
+                  and table_name = 'visits'
+                  and column_name = 'deleted_at'
+             ))::text)::text as detail
   from public.visits v
 ),
 

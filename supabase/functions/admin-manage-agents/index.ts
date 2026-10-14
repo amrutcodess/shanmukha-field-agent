@@ -1,7 +1,7 @@
 // Supabase Edge Function: admin-manage-agents
 // Manages field agent accounts (create, reset password, activate/deactivate)
+// Updated for Phase 0 (F4 security hotfix): bans auth user on deactivate, protects admins, validates inputs.
 
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 
 const corsHeaders = {
@@ -10,8 +10,9 @@ const corsHeaders = {
 };
 
 const AGENT_EMAIL_DOMAIN = "agents.shanmukhaagritech.app";
+const USERNAME_REGEX = /^[a-z0-9._-]{3,30}$/;
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -28,7 +29,7 @@ serve(async (req) => {
       );
     }
 
-    // Client to verify the calling admin user
+    // Client with service role to manage users
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
     const token = authHeader.replace("Bearer ", "");
     const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token);
@@ -57,7 +58,7 @@ serve(async (req) => {
     const { action, payload } = await req.json();
 
     if (action === "create") {
-      const { username, full_name, phone, password } = payload;
+      const { username, full_name, phone, password } = payload ?? {};
       if (!username || !full_name || !password) {
         return new Response(
           JSON.stringify({ error: "Username, full name, and password are required" }),
@@ -66,6 +67,20 @@ serve(async (req) => {
       }
 
       const cleanUsername = username.trim().toLowerCase();
+      if (!USERNAME_REGEX.test(cleanUsername)) {
+        return new Response(
+          JSON.stringify({ error: "Username must be 3-30 characters and contain only lowercase letters, numbers, '.', '_', or '-'" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (typeof password !== "string" || password.length < 8) {
+        return new Response(
+          JSON.stringify({ error: "Password must be at least 8 characters long" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       const email = `${cleanUsername}@${AGENT_EMAIL_DOMAIN}`;
 
       // Check if username exists in profiles
@@ -124,11 +139,39 @@ serve(async (req) => {
     }
 
     if (action === "reset_password") {
-      const { user_id, new_password } = payload;
+      const { user_id, new_password } = payload ?? {};
       if (!user_id || !new_password) {
         return new Response(
           JSON.stringify({ error: "User ID and new password are required" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (typeof new_password !== "string" || new_password.length < 8) {
+        return new Response(
+          JSON.stringify({ error: "Password must be at least 8 characters long" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Refuse targeting self or another admin through agent management endpoint
+      if (user_id === user.id) {
+        return new Response(
+          JSON.stringify({ error: "Cannot reset your own password via agent management endpoint" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const { data: targetProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("role")
+        .eq("id", user_id)
+        .maybeSingle();
+
+      if (targetProfile?.role === "admin") {
+        return new Response(
+          JSON.stringify({ error: "Refused: Cannot reset an administrator password" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
@@ -150,7 +193,7 @@ serve(async (req) => {
     }
 
     if (action === "set_active") {
-      const { user_id, is_active } = payload;
+      const { user_id, is_active } = payload ?? {};
       if (!user_id || typeof is_active !== "boolean") {
         return new Response(
           JSON.stringify({ error: "User ID and is_active boolean are required" }),
@@ -158,6 +201,28 @@ serve(async (req) => {
         );
       }
 
+      // Refuse deactivating self or another admin
+      if (user_id === user.id) {
+        return new Response(
+          JSON.stringify({ error: "Refused: Cannot modify active status of your own account" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const { data: targetProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("role")
+        .eq("id", user_id)
+        .maybeSingle();
+
+      if (targetProfile?.role === "admin") {
+        return new Response(
+          JSON.stringify({ error: "Refused: Cannot modify active status of an administrator" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // 1. Update profiles table
       const { error: updateError } = await supabaseAdmin
         .from("profiles")
         .update({ is_active })
@@ -169,6 +234,12 @@ serve(async (req) => {
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
+
+      // 2. Ban/un-ban auth user to immediately revoke active sessions (F4)
+      const banDuration = is_active ? "none" : "876600h"; // 100 years ban when deactivated
+      await supabaseAdmin.auth.admin.updateUserById(user_id, {
+        ban_duration: banDuration,
+      });
 
       return new Response(
         JSON.stringify({ success: true }),

@@ -43,11 +43,11 @@ export const uploadPrescriptionPhoto = async (
   clientUuid: string,
   photoBlob: Blob
 ): Promise<string> => {
-  const fileName = `${userId}/${clientUuid}_${Date.now()}.jpg`;
+  const filePath = `${userId}/prescriptions/${clientUuid}_${Date.now()}.jpg`;
 
   const { data, error } = await supabase.storage
     .from('purchase-photos')
-    .upload(`prescriptions/${fileName}`, photoBlob, {
+    .upload(filePath, photoBlob, {
       contentType: 'image/jpeg',
       upsert: true,
     });
