@@ -12,6 +12,9 @@ create temp table if not exists test_results (
   status text not null,
   detail text
 );
+alter table test_results enable row level security;
+drop policy if exists "test_results_open" on test_results;
+create policy "test_results_open" on test_results for all using (true) with check (true);
 truncate test_results;
 
 do $$
@@ -30,6 +33,7 @@ declare
   v_obj_legacy uuid := gen_random_uuid();
   v_obj_new uuid := gen_random_uuid();
   v_count integer;
+  r_loc record;
 begin
   -- 1. Setup Fixtures (auth.users & profiles)
   begin
@@ -58,12 +62,15 @@ begin
     perform set_config('request.jwt.claim.sub', v_admin_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', v_admin_id::text, 'role', 'authenticated')::text, true);
 
-    select village_id, district_id, region_id into v_vil_id, v_dist_id, v_reg_id
-    from public.get_or_create_location('Phase0 Region', 'Phase0 District', 'Phase0 Village');
+    for r_loc in (select village_id, district_id, region_id from public.get_or_create_location('Phase0 Region', 'Phase0 District', 'Phase0 Village')) loop
+      v_vil_id := r_loc.village_id;
+      v_dist_id := r_loc.district_id;
+      v_reg_id := r_loc.region_id;
+    end loop;
 
-    insert into public.crops (name_en, name_te)
-    values ('Phase0 Crop', 'పంట')
-    returning id into v_crop_id;
+    v_crop_id := gen_random_uuid();
+    insert into public.crops (id, name_en, name_te)
+    values (v_crop_id, 'Phase0 Crop', 'పంట');
   exception when others then
     insert into test_results (test_name, status, detail)
     values ('Fixture Setup', 'FAIL', 'Setup error: ' || sqlerrm);
@@ -76,14 +83,15 @@ begin
     perform set_config('request.jwt.claim.sub', v_agent1_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', v_agent1_id::text, 'role', 'authenticated')::text, true);
 
+    v_visit1_id := gen_random_uuid();
     insert into public.visits (
-      agent_id, village_id, crop_id, duration_minutes, farmer_name, farmer_phone,
+      id, agent_id, village_id, crop_id, duration_minutes, farmer_name, farmer_phone,
       diagnosis, prescription, status, prescription_image_path
     ) values (
-      v_agent1_id, v_vil_id, v_crop_id, 20, 'Farmer Ramesh', '9876543210',
+      v_visit1_id, v_agent1_id, v_vil_id, v_crop_id, 20, 'Farmer Ramesh', '9876543210',
       'Leaf blast detected', 'Spray Tricyclazole', 'pending',
       v_agent1_id || '/prescriptions/rx_101.jpg'
-    ) returning id into v_visit1_id;
+    );
 
     insert into test_results (test_name, status, detail)
     values ('F1: Create visit with prescription path', 'PASS', 'Created visit id: ' || v_visit1_id);
@@ -243,10 +251,14 @@ begin
     v_v1 uuid;
     v_v2 uuid;
   begin
-    insert into public.districts (region_id, name) values (v_reg_id, 'Merge Dist A') returning id into v_d1;
-    insert into public.districts (region_id, name) values (v_reg_id, 'Merge Dist B') returning id into v_d2;
-    insert into public.villages (district_id, name) values (v_d1, 'Collision Village') returning id into v_v1;
-    insert into public.villages (district_id, name) values (v_d2, 'Collision Village') returning id into v_v2;
+    v_d1 := gen_random_uuid();
+    v_d2 := gen_random_uuid();
+    v_v1 := gen_random_uuid();
+    v_v2 := gen_random_uuid();
+    insert into public.districts (id, region_id, name) values (v_d1, v_reg_id, 'Merge Dist A');
+    insert into public.districts (id, region_id, name) values (v_d2, v_reg_id, 'Merge Dist B');
+    insert into public.villages (id, district_id, name) values (v_v1, v_d1, 'Collision Village');
+    insert into public.villages (id, district_id, name) values (v_v2, v_d2, 'Collision Village');
 
     perform set_config('request.jwt.claim.sub', v_admin_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', v_admin_id::text, 'role', 'authenticated')::text, true);

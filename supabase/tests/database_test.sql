@@ -15,6 +15,9 @@ create temp table if not exists test_results (
   status text not null,
   detail text
 );
+alter table test_results enable row level security;
+drop policy if exists "test_results_open" on test_results;
+create policy "test_results_open" on test_results for all using (true) with check (true);
 truncate test_results;
 
 do $$
@@ -24,6 +27,7 @@ declare
   v_viewer_id uuid := 'bbbbbbbb-2222-2222-2222-222222222222';
   v_agent_a_id uuid := 'cccccccc-3333-3333-3333-333333333333';
   v_agent_b_id uuid := 'dddddddd-4444-4444-4444-444444444444';
+  r_loc record;
 
   -- Fixtures
   v_reg_id uuid;
@@ -67,28 +71,35 @@ begin
     perform set_config('request.jwt.claim.sub', v_admin_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', v_admin_id::text, 'role', 'authenticated')::text, true);
 
-    select village_id, district_id, region_id into v_vil_id, v_dist_id, v_reg_id
-    from public.get_or_create_location('Phase1 Region', 'Phase1 District', 'Phase1 Village');
+    for r_loc in (select village_id, district_id, region_id from public.get_or_create_location('Phase1 Region', 'Phase1 District', 'Phase1 Village')) loop
+      v_vil_id := r_loc.village_id;
+      v_dist_id := r_loc.district_id;
+      v_reg_id := r_loc.region_id;
+    end loop;
 
-    select id into v_crop_id from public.crops where lower(btrim(name_en)) = 'paddy' limit 1;
-    select id into v_stage_id from public.crop_stages where crop_id = v_crop_id and sort_order = 1 limit 1;
-    select id into v_service_id from public.value_added_services where code = 'sticky_traps' limit 1;
+    v_crop_id := (select id from public.crops where lower(btrim(name_en)) = 'paddy' limit 1);
+    v_stage_id := (select id from public.crop_stages where crop_id = v_crop_id and sort_order = 1 limit 1);
+    v_service_id := (select id from public.value_added_services where code = 'sticky_traps' limit 1);
 
     -- Create 2 products with pack sizes
-    insert into public.products (name_en, name_te, is_active) values ('Test Prod A', 'ప్రొడక్ట్ A', true) returning id into v_prod_a_id;
-    insert into public.product_sizes (product_id, size_label, sort_order) values (v_prod_a_id, '500 ml', 1) returning id into v_size_a_id;
+    v_prod_a_id := gen_random_uuid();
+    v_size_a_id := gen_random_uuid();
+    insert into public.products (id, name_en, name_te, is_active) values (v_prod_a_id, 'Test Prod A', 'ప్రొడక్ట్ A', true);
+    insert into public.product_sizes (id, product_id, size_label, sort_order) values (v_size_a_id, v_prod_a_id, '500 ml', 1);
 
-    insert into public.products (name_en, name_te, is_active) values ('Test Prod B', 'ప్రొడక్ట్ B', true) returning id into v_prod_b_id;
-    insert into public.product_sizes (product_id, size_label, sort_order) values (v_prod_b_id, '1000 ml', 1) returning id into v_size_b_id;
+    v_prod_b_id := gen_random_uuid();
+    v_size_b_id := gen_random_uuid();
+    insert into public.products (id, name_en, name_te, is_active) values (v_prod_b_id, 'Test Prod B', 'ప్రొడక్ట్ B', true);
+    insert into public.product_sizes (id, product_id, size_label, sort_order) values (v_size_b_id, v_prod_b_id, '1000 ml', 1);
 
     -- Create Farmer A & Farmer B
-    insert into public.farmers (farmer_code, full_name, phone, village_id, farm_lat, farm_lng, farm_accuracy_m, consent_status, onboarded_by)
-    values ('SA-100001', 'Farmer Alpha', '+919100000001', v_vil_id, 16.506174, 80.648015, 12.5, 'granted', v_agent_a_id)
-    returning id into v_farmer_a_id;
+    v_farmer_a_id := gen_random_uuid();
+    v_farmer_b_id := gen_random_uuid();
+    insert into public.farmers (id, farmer_code, full_name, phone, village_id, farm_lat, farm_lng, farm_accuracy_m, consent_status, onboarded_by)
+    values (v_farmer_a_id, 'SA-100001', 'Farmer Alpha', '+919100000001', v_vil_id, 16.506174, 80.648015, 12.5, 'granted', v_agent_a_id);
 
-    insert into public.farmers (farmer_code, full_name, phone, village_id, farm_lat, farm_lng, farm_accuracy_m, consent_status, onboarded_by)
-    values ('SA-100002', 'Farmer Beta', '+919100000002', v_vil_id, 16.507174, 80.649015, 10.0, 'granted', v_agent_b_id)
-    returning id into v_farmer_b_id;
+    insert into public.farmers (id, farmer_code, full_name, phone, village_id, farm_lat, farm_lng, farm_accuracy_m, consent_status, onboarded_by)
+    values (v_farmer_b_id, 'SA-100002', 'Farmer Beta', '+919100000002', v_vil_id, 16.507174, 80.649015, 10.0, 'granted', v_agent_b_id);
 
     -- Assign Farmer A to Agent A; Farmer B to Agent B
     insert into public.farmer_assignments (farmer_id, agent_id, assigned_by)
@@ -98,14 +109,14 @@ begin
     values (v_farmer_b_id, v_agent_b_id, v_admin_id);
 
     -- Create Crop Cycle for Farmer A
-    insert into public.crop_cycles (farmer_id, crop_id, season, acreage, sowing_date)
-    values (v_farmer_a_id, v_crop_id, 'Kharif 2026', 3.5, current_date - 30)
-    returning id into v_cycle_a_id;
+    v_cycle_a_id := gen_random_uuid();
+    insert into public.crop_cycles (id, farmer_id, crop_id, season, acreage, sowing_date)
+    values (v_cycle_a_id, v_farmer_a_id, v_crop_id, 'Kharif 2026', 3.5, current_date - 30);
 
     -- Create Consent for Farmer A
-    insert into public.farmer_consents (farmer_id, agent_id, event, notice_version, notice_language)
-    values (v_farmer_a_id, v_agent_a_id, 'granted', '1.0', 'te')
-    returning id into v_consent_id;
+    v_consent_id := gen_random_uuid();
+    insert into public.farmer_consents (id, farmer_id, agent_id, event, notice_version, notice_language)
+    values (v_consent_id, v_farmer_a_id, v_agent_a_id, 'granted', '1.0', 'te');
   exception when others then
     insert into test_results (test_name, status, detail)
     values ('Fixture Setup', 'FAIL', 'Setup error: ' || sqlerrm);
@@ -144,11 +155,12 @@ begin
 
   -- TEST 3: Product Size Composite Foreign Key Enforcement
   begin
+    v_visit_a1_id := gen_random_uuid();
     insert into public.farm_visits (
-      farmer_id, crop_cycle_id, agent_id, status, started_at, start_lat, start_lng, tracking_mode
+      id, farmer_id, crop_cycle_id, agent_id, status, started_at, start_lat, start_lng, tracking_mode
     ) values (
-      v_farmer_a_id, v_cycle_a_id, v_agent_a_id, 'in_progress', now(), 16.506174, 80.648015, 'native_continuous'
-    ) returning id into v_visit_a1_id;
+      v_visit_a1_id, v_farmer_a_id, v_cycle_a_id, v_agent_a_id, 'in_progress', now(), 16.506174, 80.648015, 'native_continuous'
+    );
 
     insert into public.visit_purchase_items (
       visit_id, product_id, product_size_id, quantity, product_name_snapshot, size_label_snapshot
