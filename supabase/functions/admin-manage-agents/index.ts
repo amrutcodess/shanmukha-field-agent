@@ -4,8 +4,9 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 
+const allowedOrigin = Deno.env.get("ALLOWED_ORIGIN") || "*";
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": allowedOrigin,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
@@ -106,8 +107,9 @@ Deno.serve(async (req) => {
       });
 
       if (createError || !newUser.user) {
+        console.error("Agent auth creation failed:", createError);
         return new Response(
-          JSON.stringify({ error: createError?.message || "Failed to create auth user" }),
+          JSON.stringify({ error: "Failed to create agent user" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -124,10 +126,11 @@ Deno.serve(async (req) => {
       });
 
       if (insertProfileError) {
+        console.error("Profile insert failed:", insertProfileError);
         // Rollback auth user creation if profile insert fails
         await supabaseAdmin.auth.admin.deleteUser(newUser.user.id);
         return new Response(
-          JSON.stringify({ error: insertProfileError.message }),
+          JSON.stringify({ error: "Failed to create agent profile" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -180,8 +183,9 @@ Deno.serve(async (req) => {
       });
 
       if (resetError) {
+        console.error("Password reset error:", resetError);
         return new Response(
-          JSON.stringify({ error: resetError.message }),
+          JSON.stringify({ error: "Failed to reset agent password" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -229,8 +233,9 @@ Deno.serve(async (req) => {
         .eq("id", user_id);
 
       if (updateError) {
+        console.error("Agent status update error:", updateError);
         return new Response(
-          JSON.stringify({ error: updateError.message }),
+          JSON.stringify({ error: "Failed to update agent status" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -252,8 +257,9 @@ Deno.serve(async (req) => {
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (err: any) {
+    console.error("Unhandled admin-manage-agents exception:", err);
     return new Response(
-      JSON.stringify({ error: err.message || "Internal server error" }),
+      JSON.stringify({ error: "An unexpected error occurred processing your request" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

@@ -64,7 +64,7 @@ export const getSignedPhotoUrl = async (path: string): Promise<string | null> =>
   try {
     const { data, error } = await supabase.storage
       .from('purchase-photos')
-      .createSignedUrl(path, 3600); // 1 hour expiration
+      .createSignedUrl(path, 600); // 10 minutes expiration
 
     if (error || !data) {
       console.error('Failed to get signed URL:', error);

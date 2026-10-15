@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../lib/supabase';
+import { callAdminManageAgents } from '../../lib/admin-agents';
 import type { Profile } from '../../types';
 import { LoadingSpinner } from '../../components/LoadingSpinner';
 import {
@@ -55,26 +56,7 @@ export const Agents: React.FC = () => {
     fetchAgents();
   }, [fetchAgents]);
 
-  const callAdminEdgeFunction = async (action: string, payload: any) => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) throw new Error('Unauthenticated admin session');
-
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const response = await fetch(`${supabaseUrl}/functions/v1/admin-manage-agents`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({ action, payload }),
-    });
-
-    const result = await response.json();
-    if (!response.ok) {
-      throw new Error(result.error || 'Edge function error');
-    }
-    return result;
-  };
+  const callAdminEdgeFunction = callAdminManageAgents;
 
   const handleCreateAgent = async (e: React.FormEvent) => {
     e.preventDefault();

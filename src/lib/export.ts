@@ -14,10 +14,13 @@ export const formatDateEn = (dateStr?: string | null): string => {
   if (!dateStr) return '';
   try {
     const d = new Date(dateStr);
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    return `${day}-${month}-${year}`;
+    const formatted = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).format(d);
+    return formatted.replace(/\//g, '-');
   } catch {
     return dateStr;
   }
@@ -27,13 +30,12 @@ export const formatTimeEn = (dateStr?: string | null): string => {
   if (!dateStr) return '';
   try {
     const d = new Date(dateStr);
-    let hours = d.getHours();
-    const minutes = String(d.getMinutes()).padStart(2, '0');
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12;
-    hours = hours ? hours : 12; // 0 should be 12
-    const strHours = String(hours).padStart(2, '0');
-    return `${strHours}:${minutes} ${ampm}`;
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    }).format(d);
   } catch {
     return '';
   }
