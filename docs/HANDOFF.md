@@ -1,6 +1,6 @@
 # HANDOFF (update this before you stop working)
 
-## Baseline (verified 2026-10-15 on branch v2)
+## Baseline (verified 2026-10-15 on commit 0605b57)
 - `npx tsc -b` passes (0 errors, code 0).
 - `npx vitest run`: 20 tests in 5 suites pass (code 0).
 - `npx oxlint`: 0 errors, 36 warnings (code 0).
