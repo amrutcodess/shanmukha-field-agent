@@ -1,7 +1,7 @@
 -- supabase/tests/database_test.sql
 -- Comprehensive Phase 1 & Gate 1 Database Test Suite
--- Strict verification covering B1-B6 blockers, security constraints, RLS policies, and controls.
--- Outputs results as a visible table grid with summary counts.
+-- Strict verification covering B1-B6 blockers, Gap A, Gap B, security constraints, and RLS policies.
+-- Prints exactly ONE result grid so all test rows are visible in the SQL editor.
 -- Safe: executes inside a transaction and rolls back at the end.
 
 begin;
@@ -32,7 +32,6 @@ declare
   v_agent_a_id uuid := 'cccccccc-3333-3333-3333-333333333333';
   v_agent_b_id uuid := 'dddddddd-4444-4444-4444-444444444444';
   v_deact_id   uuid := 'eeeeeeee-5555-5555-5555-555555555555';
-  r_loc record;
 
   -- Fixtures
   v_reg_id     uuid;
@@ -50,18 +49,22 @@ declare
   -- Test entities
   v_farmer_a_id  uuid;
   v_farmer_b_id  uuid;
-  v_farmer_c_id  uuid;
   v_cycle_a_id   uuid;
   v_visit_a1_id  uuid;
   v_consent_id   uuid;
   v_fk_visit_id  uuid;
   v_own_visit_id uuid;
+  v_gap_visit_id uuid;
   v_dummy_id     uuid;
   v_count        integer;
   v_val_text     text;
   v_before_cnt   integer;
   v_after_cnt    integer;
   v_ts_check     timestamptz;
+  v_ended_at     timestamptz;
+  v_duration     integer;
+  v_view_name    text;
+  v_leaked_privs text;
 
 begin
   -- =========================================================================
@@ -192,11 +195,9 @@ begin
 
     update public.farm_visits
     set status = 'completed',
-      ended_at = now(),
-      duration_seconds = 1800,
-      observations_diagnosis = 'Normal healthy growth',
-      crop_stage_id = v_stage_id,
-      no_services_chosen = false
+        crop_stage_id = v_stage_id,
+        observations_diagnosis = 'Normal healthy growth',
+        no_services_chosen = false
     where id = v_own_visit_id;
 
     insert into test_results (test_name, status, detail)
@@ -221,7 +222,7 @@ begin
     insert into test_results (test_name, status, detail)
     values ('Consent Ledger: Block UPDATE', 'FAIL', 'UPDATE succeeded; trigger did not fire');
   exception when others then
-    if sqlerrm like '%Append-only consent ledger: UPDATE is forbidden%' then
+    if sqlerrm like '%immutable append-only ledger%' then
       insert into test_results (test_name, status, detail)
       values ('Consent Ledger: Block UPDATE', 'PASS', 'Trigger strictly prevented UPDATE');
     else
@@ -235,12 +236,15 @@ begin
   -- =========================================================================
   begin
     perform set_config('role', '', true);
+    perform set_config('request.jwt.claim.sub', '', true);
+    perform set_config('request.jwt.claims', '', true);
+
     delete from public.farmer_consents where id = v_consent_id;
 
     insert into test_results (test_name, status, detail)
     values ('Consent Ledger: Block DELETE', 'FAIL', 'DELETE succeeded; trigger did not fire');
   exception when others then
-    if sqlerrm like '%Append-only consent ledger: DELETE is forbidden%' then
+    if sqlerrm like '%immutable append-only ledger%' then
       insert into test_results (test_name, status, detail)
       values ('Consent Ledger: Block DELETE', 'PASS', 'Trigger strictly prevented DELETE');
     else
@@ -253,28 +257,36 @@ begin
   -- 5. Consent Ledger: Block TRUNCATE
   -- =========================================================================
   begin
+    perform set_config('role', '', true);
+    perform set_config('request.jwt.claim.sub', '', true);
+    perform set_config('request.jwt.claims', '', true);
+
     truncate table public.farmer_consents;
     insert into test_results (test_name, status, detail)
     values ('Consent Ledger: Block TRUNCATE', 'FAIL', 'TRUNCATE succeeded; table truncated');
   exception when others then
-    if sqlerrm like '%permission denied%' or sqlerrm like '%Append-only%' or sqlerrm like '%cannot truncate%' then
+    if sqlerrm like '%immutable append-only ledger%' then
       insert into test_results (test_name, status, detail)
       values ('Consent Ledger: Block TRUNCATE', 'PASS', 'TRUNCATE operation strictly blocked');
     else
       insert into test_results (test_name, status, detail)
-      values ('Consent Ledger: Block TRUNCATE', 'PASS', 'TRUNCATE prevented: ' || sqlerrm);
+      values ('Consent Ledger: Block TRUNCATE', 'FAIL', 'Unexpected error on TRUNCATE: ' || sqlerrm);
     end if;
   end;
 
   -- =========================================================================
-  -- 6. Catalogs: Composite FK product/size
+  -- 6. Catalogs: Composite FK product/size (Runs as postgres with admin claims)
   -- =========================================================================
   begin
+    perform set_config('role', '', true);
+    perform set_config('request.jwt.claim.sub', v_admin_id::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_admin_id::text, 'role', 'authenticated')::text, true);
+
     v_fk_visit_id := gen_random_uuid();
     insert into public.farm_visits (
       id, client_uuid, farmer_id, crop_cycle_id, agent_id, status, started_at, start_lat, start_lng, tracking_mode, no_services_chosen, time_source
     ) values (
-      v_fk_visit_id, gen_random_uuid(), v_farmer_a_id, v_cycle_a_id, v_agent_a_id, 'in_progress', now(), 16.5, 80.6, 'native_continuous', true, 'server'
+      v_fk_visit_id, gen_random_uuid(), v_farmer_a_id, v_cycle_a_id, v_agent_a_id, 'in_progress', now() + interval '30 days', 16.5, 80.6, 'native_continuous', true, 'server'
     );
 
     insert into public.visit_purchase_items (visit_id, product_id, product_size_id, quantity)
@@ -297,14 +309,19 @@ begin
   end;
 
   -- =========================================================================
-  -- 7. Visits: One in_progress per agent
+  -- 7. Visits: One in_progress per agent (Runs as postgres with admin claims)
   -- =========================================================================
   begin
+    perform set_config('role', '', true);
+    perform set_config('request.jwt.claim.sub', v_admin_id::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_admin_id::text, 'role', 'authenticated')::text, true);
+
+    -- Attempt inserting second in_progress visit for Agent A (Agent A already has visit_a1 in_progress)
     insert into public.farm_visits (
       client_uuid, farmer_id, crop_cycle_id, agent_id, status, started_at, start_lat, start_lng, tracking_mode, time_source
     ) values (
       gen_random_uuid(), v_farmer_a_id, v_cycle_a_id, v_agent_a_id, 'in_progress',
-      now() + interval '5 days', 16.506174, 80.648015, 'native_continuous', 'server'
+      now() + interval '10 days', 16.506174, 80.648015, 'native_continuous', 'server'
     );
 
     insert into test_results (test_name, status, detail)
@@ -324,15 +341,19 @@ begin
   end;
 
   -- =========================================================================
-  -- 8. Visits: Non-overlapping time (btree_gist)
+  -- 8. Visits: Non-overlapping time (btree_gist) (Runs as postgres with admin claims)
   -- =========================================================================
   begin
+    perform set_config('role', '', true);
+    perform set_config('request.jwt.claim.sub', v_admin_id::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_admin_id::text, 'role', 'authenticated')::text, true);
+
     insert into public.farm_visits (
       client_uuid, farmer_id, crop_cycle_id, agent_id, status, started_at, ended_at,
       duration_seconds, start_lat, start_lng, tracking_mode, no_services_chosen, observations_diagnosis, crop_stage_id, time_source
     ) values (
       gen_random_uuid(), v_farmer_a_id, v_cycle_a_id, v_agent_a_id, 'completed',
-      now() - interval '10 days', now() - interval '10 days' + interval '60 minutes',
+      now() - interval '20 days', now() - interval '20 days' + interval '60 minutes',
       3600, 16.506174, 80.648015, 'native_continuous', true, 'Historical completed visit 1', v_stage_id, 'server'
     );
 
@@ -341,7 +362,7 @@ begin
       duration_seconds, start_lat, start_lng, tracking_mode, no_services_chosen, observations_diagnosis, crop_stage_id, time_source
     ) values (
       gen_random_uuid(), v_farmer_a_id, v_cycle_a_id, v_agent_a_id, 'completed',
-      now() - interval '10 days' + interval '15 minutes', now() - interval '10 days' + interval '75 minutes',
+      now() - interval '20 days' + interval '15 minutes', now() - interval '20 days' + interval '75 minutes',
       3600, 16.506174, 80.648015, 'native_continuous', true, 'Overlapping completed visit', v_stage_id, 'server'
     );
 
@@ -362,12 +383,18 @@ begin
   end;
 
   -- =========================================================================
-  -- 9. Visits: Completion services validation
+  -- 9. Visits: Completion services validation (Runs as Agent A on own visit)
   -- =========================================================================
   begin
+    perform set_config('role', 'authenticated', true);
+    perform set_config('request.jwt.claim.sub', v_agent_a_id::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_agent_a_id::text, 'role', 'authenticated')::text, true);
+
+    -- Ensure no services attached to v_visit_a1_id
+    delete from public.visit_services where visit_id = v_visit_a1_id;
+
     update public.farm_visits
     set status = 'completed',
-        ended_at = now(),
         observations_diagnosis = 'Missing service requirement',
         crop_stage_id = v_stage_id,
         no_services_chosen = false
@@ -434,7 +461,7 @@ begin
   -- =========================================================================
   begin
     perform set_config('role', 'anon', true);
-    perform set_config('request.jwt.claim.sub', null, true);
+    perform set_config('request.jwt.claim.sub', '', true);
     perform set_config('request.jwt.claims', '{}', true);
 
     if exists(select 1 from public.farmers) or
@@ -447,8 +474,13 @@ begin
       values ('RLS: Anonymous lockdown', 'PASS', 'Anon user sees 0 rows across farmers, farm_visits, and app_config');
     end if;
   exception when others then
-    insert into test_results (test_name, status, detail)
-    values ('RLS: Anonymous lockdown', 'PASS', 'Anon access rejected: ' || sqlerrm);
+    if sqlerrm like '%permission denied%' then
+      insert into test_results (test_name, status, detail)
+      values ('RLS: Anonymous lockdown', 'PASS', 'Anon access rejected: ' || sqlerrm);
+    else
+      insert into test_results (test_name, status, detail)
+      values ('RLS: Anonymous lockdown', 'FAIL', 'Unexpected error: ' || sqlerrm);
+    end if;
   end;
 
   -- =========================================================================
@@ -501,8 +533,13 @@ begin
       insert into test_results (test_name, status, detail)
       values ('RLS: Immutability of visit agent_id', 'FAIL', 'Agent was able to change agent_id on own visit');
     exception when others then
-      insert into test_results (test_name, status, detail)
-      values ('RLS: Immutability of visit agent_id', 'PASS', 'Trigger prevented agent_id reassignment');
+      if sqlerrm like '%Cannot change agent_id%' then
+        insert into test_results (test_name, status, detail)
+        values ('RLS: Immutability of visit agent_id', 'PASS', 'Trigger strictly prevented agent_id reassignment');
+      else
+        insert into test_results (test_name, status, detail)
+        values ('RLS: Immutability of visit agent_id', 'FAIL', 'Unexpected error: ' || sqlerrm);
+      end if;
     end;
 
     begin
@@ -510,8 +547,13 @@ begin
       insert into test_results (test_name, status, detail)
       values ('RLS: Immutability of visit farmer_id', 'FAIL', 'Agent was able to change farmer_id on own visit');
     exception when others then
-      insert into test_results (test_name, status, detail)
-      values ('RLS: Immutability of visit farmer_id', 'PASS', 'Trigger prevented farmer_id reassignment');
+      if sqlerrm like '%Cannot change farmer_id%' then
+        insert into test_results (test_name, status, detail)
+        values ('RLS: Immutability of visit farmer_id', 'PASS', 'Trigger strictly prevented farmer_id reassignment');
+      else
+        insert into test_results (test_name, status, detail)
+        values ('RLS: Immutability of visit farmer_id', 'FAIL', 'Unexpected error: ' || sqlerrm);
+      end if;
     end;
   end;
 
@@ -539,12 +581,11 @@ begin
 
   -- =========================================================================
   -- 16. B1: Views RLS Lockdown (visits_full, farm_visits_full, farmers_full)
-  -- Tested across: anon, unassigned agent, deactivated agent, assigned agent, admin
   -- =========================================================================
   begin
     -- 16a. Anon queries views
     perform set_config('role', 'anon', true);
-    perform set_config('request.jwt.claim.sub', null, true);
+    perform set_config('request.jwt.claim.sub', '', true);
     perform set_config('request.jwt.claims', '{}', true);
 
     begin
@@ -576,6 +617,7 @@ begin
     end if;
 
     -- 16c. Deactivated agent queries views
+    perform set_config('role', 'authenticated', true);
     perform set_config('request.jwt.claim.sub', v_deact_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', v_deact_id::text, 'role', 'authenticated')::text, true);
 
@@ -589,6 +631,7 @@ begin
     end if;
 
     -- 16d. Assigned agent queries views (Agent A sees own Farmer A and Visit A1)
+    perform set_config('role', 'authenticated', true);
     perform set_config('request.jwt.claim.sub', v_agent_a_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', v_agent_a_id::text, 'role', 'authenticated')::text, true);
 
@@ -602,6 +645,7 @@ begin
     end if;
 
     -- 16e. Admin queries views (Admin sees all)
+    perform set_config('role', 'authenticated', true);
     perform set_config('request.jwt.claim.sub', v_admin_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', v_admin_id::text, 'role', 'authenticated')::text, true);
 
@@ -638,11 +682,16 @@ begin
       insert into test_results (test_name, status, detail)
       values ('B2: Reject completed visit insert', 'FAIL', 'Agent was able to insert completed visit with arbitrary times');
     exception when others then
-      insert into test_results (test_name, status, detail)
-      values ('B2: Reject completed visit insert', 'PASS', 'Direct completed insert strictly rejected: ' || sqlerrm);
+      if sqlerrm like '%Non-admins can only insert visits with status in_progress%' then
+        insert into test_results (test_name, status, detail)
+        values ('B2: Reject completed visit insert', 'PASS', 'Direct completed insert strictly rejected: ' || sqlerrm);
+      else
+        insert into test_results (test_name, status, detail)
+        values ('B2: Reject completed visit insert', 'FAIL', 'Unexpected error: ' || sqlerrm);
+      end if;
     end;
 
-    -- 17b. Agent changing started_at or time_source is rejected
+    -- 17b. Agent changing started_at is rejected
     begin
       update public.farm_visits
       set started_at = now() - interval '1 hour'
@@ -650,8 +699,13 @@ begin
       insert into test_results (test_name, status, detail)
       values ('B2: Reject started_at modification', 'FAIL', 'Agent was able to modify started_at');
     exception when others then
-      insert into test_results (test_name, status, detail)
-      values ('B2: Reject started_at modification', 'PASS', 'started_at modification rejected: ' || sqlerrm);
+      if sqlerrm like '%started_at is immutable and cannot be changed%' then
+        insert into test_results (test_name, status, detail)
+        values ('B2: Reject started_at modification', 'PASS', 'started_at modification rejected: ' || sqlerrm);
+      else
+        insert into test_results (test_name, status, detail)
+        values ('B2: Reject started_at modification', 'FAIL', 'Unexpected error: ' || sqlerrm);
+      end if;
     end;
 
   end;
@@ -671,11 +725,17 @@ begin
       insert into test_results (test_name, status, detail)
       values ('B3: Agent direct farmer insert', 'FAIL', 'Agent direct farmer insert succeeded');
     exception when others then
-      insert into test_results (test_name, status, detail)
-      values ('B3: Agent direct farmer insert', 'PASS', 'Direct insert rejected by RLS: ' || sqlerrm);
+      if sqlerrm like '%violates row-level security policy for table "farmers"%' then
+        insert into test_results (test_name, status, detail)
+        values ('B3: Agent direct farmer insert', 'PASS', 'Direct insert rejected by RLS: ' || sqlerrm);
+      else
+        insert into test_results (test_name, status, detail)
+        values ('B3: Agent direct farmer insert', 'FAIL', 'Unexpected error: ' || sqlerrm);
+      end if;
     end;
 
     -- 18b. Admin direct insert on farmers is rejected
+    perform set_config('role', 'authenticated', true);
     perform set_config('request.jwt.claim.sub', v_admin_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', v_admin_id::text, 'role', 'authenticated')::text, true);
 
@@ -685,11 +745,17 @@ begin
       insert into test_results (test_name, status, detail)
       values ('B3: Admin direct farmer insert', 'FAIL', 'Admin direct farmer insert succeeded');
     exception when others then
-      insert into test_results (test_name, status, detail)
-      values ('B3: Admin direct farmer insert', 'PASS', 'Direct insert rejected by RLS: ' || sqlerrm);
+      if sqlerrm like '%violates row-level security policy for table "farmers"%' then
+        insert into test_results (test_name, status, detail)
+        values ('B3: Admin direct farmer insert', 'PASS', 'Direct insert rejected by RLS: ' || sqlerrm);
+      else
+        insert into test_results (test_name, status, detail)
+        values ('B3: Admin direct farmer insert', 'FAIL', 'Unexpected error: ' || sqlerrm);
+      end if;
     end;
 
     -- 18c. Direct insert on farmer_consents is rejected for agent & admin
+    perform set_config('role', 'authenticated', true);
     perform set_config('request.jwt.claim.sub', v_agent_a_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', v_agent_a_id::text, 'role', 'authenticated')::text, true);
 
@@ -699,12 +765,20 @@ begin
       insert into test_results (test_name, status, detail)
       values ('B3: Agent direct consent insert', 'FAIL', 'Agent direct consent insert succeeded');
     exception when others then
-      insert into test_results (test_name, status, detail)
-      values ('B3: Agent direct consent insert', 'PASS', 'Direct consent insert rejected by RLS: ' || sqlerrm);
+      if sqlerrm like '%violates row-level security policy for table "farmer_consents"%' then
+        insert into test_results (test_name, status, detail)
+        values ('B3: Agent direct consent insert', 'PASS', 'Direct consent insert rejected by RLS: ' || sqlerrm);
+      else
+        insert into test_results (test_name, status, detail)
+        values ('B3: Agent direct consent insert', 'FAIL', 'Unexpected error: ' || sqlerrm);
+      end if;
     end;
 
     -- 18d. Farmer code generation check
     perform set_config('role', '', true);
+    perform set_config('request.jwt.claim.sub', '', true);
+    perform set_config('request.jwt.claims', '', true);
+
     insert into public.farmers (full_name, phone, village_id, farm_lat, farm_lng, farm_accuracy_m, consent_status, onboarded_by)
     values ('Auto Code Farmer', '+919876543299', v_vil_id, 16.5, 80.6, 5.0, 'granted', v_agent_a_id)
     returning farmer_code into v_val_text;
@@ -738,6 +812,8 @@ begin
 
     -- 19b. Viewer reads masked phone through view (client_sees_phone is false)
     perform set_config('role', '', true);
+    perform set_config('request.jwt.claim.sub', '', true);
+    perform set_config('request.jwt.claims', '', true);
     update public.app_config set value = 'false'::jsonb where key = 'client_sees_phone';
 
     perform set_config('role', 'authenticated', true);
@@ -745,7 +821,7 @@ begin
     perform set_config('request.jwt.claims', json_build_object('sub', v_viewer_id::text, 'role', 'authenticated')::text, true);
 
     select phone into v_val_text from public.farmers_masked where id = v_farmer_a_id;
-    if v_val_text = 'XXXXXX0001' or v_val_text like '%0001' and v_val_text not like '%+9191%' then
+    if v_val_text = 'XXXXXX0001' or (v_val_text like '%0001' and v_val_text not like '%+9191%') then
       insert into test_results (test_name, status, detail)
       values ('B4: Phone masking (default false)', 'PASS', 'Phone successfully masked for viewer: ' || v_val_text);
     else
@@ -755,6 +831,8 @@ begin
 
     -- 19c. Flipping client_sees_phone to true unmasks phone
     perform set_config('role', '', true);
+    perform set_config('request.jwt.claim.sub', '', true);
+    perform set_config('request.jwt.claims', '', true);
     update public.app_config set value = 'true'::jsonb where key = 'client_sees_phone';
 
     perform set_config('role', 'authenticated', true);
@@ -772,6 +850,8 @@ begin
 
     -- Revert config to false
     perform set_config('role', '', true);
+    perform set_config('request.jwt.claim.sub', '', true);
+    perform set_config('request.jwt.claims', '', true);
     update public.app_config set value = 'false'::jsonb where key = 'client_sees_phone';
 
     -- 19d. Agent sees unmasked phone on own farmer
@@ -833,6 +913,9 @@ begin
   -- =========================================================================
   begin
     perform set_config('role', '', true);
+    perform set_config('request.jwt.claim.sub', '', true);
+    perform set_config('request.jwt.claims', '', true);
+
     select count(*) into v_before_cnt from public.crops;
 
     insert into public.crops (name_en, name_te, is_active) values
@@ -867,11 +950,20 @@ begin
       insert into test_results (test_name, status, detail)
       values ('Small Fix: audit_log actor_id validation', 'FAIL', 'Allowed spoofing actor_id');
     exception when others then
-      insert into test_results (test_name, status, detail)
-      values ('Small Fix: audit_log actor_id validation', 'PASS', 'Spoofed actor_id rejected by RLS: ' || sqlerrm);
+      if sqlerrm like '%violates row-level security policy for table "audit_log"%' then
+        insert into test_results (test_name, status, detail)
+        values ('Small Fix: audit_log actor_id validation', 'PASS', 'Spoofed actor_id rejected by RLS: ' || sqlerrm);
+      else
+        insert into test_results (test_name, status, detail)
+        values ('Small Fix: audit_log actor_id validation', 'FAIL', 'Unexpected error: ' || sqlerrm);
+      end if;
     end;
 
     -- 22b. app_events INSERT requires visit_id to belong to caller
+    perform set_config('role', 'authenticated', true);
+    perform set_config('request.jwt.claim.sub', v_agent_a_id::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_agent_a_id::text, 'role', 'authenticated')::text, true);
+
     begin
       -- Attempt inserting event for Agent B's visit while authenticated as Agent A
       insert into public.app_events (visit_id, agent_id, type)
@@ -879,12 +971,20 @@ begin
       insert into test_results (test_name, status, detail)
       values ('Small Fix: app_events visit_id validation', 'FAIL', 'Allowed event for another agents visit');
     exception when others then
-      insert into test_results (test_name, status, detail)
-      values ('Small Fix: app_events visit_id validation', 'PASS', 'Event on other agents visit rejected by RLS: ' || sqlerrm);
+      if sqlerrm like '%violates row-level security policy for table "app_events"%' then
+        insert into test_results (test_name, status, detail)
+        values ('Small Fix: app_events visit_id validation', 'PASS', 'Event on other agents visit rejected by RLS: ' || sqlerrm);
+      else
+        insert into test_results (test_name, status, detail)
+        values ('Small Fix: app_events visit_id validation', 'FAIL', 'Unexpected error: ' || sqlerrm);
+      end if;
     end;
 
     -- 22c. Server timestamps trigger overwrites client-provided values
     perform set_config('role', '', true);
+    perform set_config('request.jwt.claim.sub', '', true);
+    perform set_config('request.jwt.claims', '', true);
+
     insert into public.app_events (agent_id, type, at)
     values (v_agent_a_id, 'gps_disabled', now() - interval '10 days')
     returning at into v_ts_check;
@@ -911,14 +1011,120 @@ begin
       insert into test_results (test_name, status, detail)
       values ('RLS: Agent visit for unassigned farmer', 'FAIL', 'Agent was able to create visit for unassigned farmer');
     exception when others then
-      insert into test_results (test_name, status, detail)
-      values ('RLS: Agent visit for unassigned farmer', 'PASS', 'Visit for unassigned farmer rejected by RLS: ' || sqlerrm);
+      if sqlerrm like '%violates row-level security policy for table "farm_visits"%' then
+        insert into test_results (test_name, status, detail)
+        values ('RLS: Agent visit for unassigned farmer', 'PASS', 'Visit for unassigned farmer rejected by RLS: ' || sqlerrm);
+      else
+        insert into test_results (test_name, status, detail)
+        values ('RLS: Agent visit for unassigned farmer', 'FAIL', 'Unexpected error: ' || sqlerrm);
+      end if;
     end;
+  end;
+
+  -- =========================================================================
+  -- 23. GAP A: Server-Authoritative ended_at & duration_seconds on Visit Completion
+  -- =========================================================================
+  begin
+    perform set_config('role', 'authenticated', true);
+    perform set_config('request.jwt.claim.sub', v_agent_b_id::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_agent_b_id::text, 'role', 'authenticated')::text, true);
+
+    -- Insert in_progress visit as Agent B
+    v_gap_visit_id := gen_random_uuid();
+    insert into public.farm_visits (
+      id, client_uuid, farmer_id, agent_id, status, started_at, start_lat, start_lng, tracking_mode, time_source
+    ) values (
+      v_gap_visit_id, gen_random_uuid(), v_farmer_b_id, v_agent_b_id,
+      'in_progress', now() - interval '45 minutes', 16.5, 80.6, 'native_continuous', 'server'
+    );
+
+    insert into public.visit_services (visit_id, service_id)
+    values (v_gap_visit_id, v_service_id);
+
+    -- Agent attempts to complete visit with backdated ended_at (5 days ago) and forged duration_seconds (99999)
+    update public.farm_visits
+    set status = 'completed',
+        ended_at = now() - interval '5 days',
+        duration_seconds = 99999,
+        crop_stage_id = v_stage_id,
+        no_services_chosen = false
+    where id = v_gap_visit_id;
+
+    select ended_at, duration_seconds into v_ended_at, v_duration
+    from public.farm_visits where id = v_gap_visit_id;
+
+    -- Gap A (i): ended_at within 5s of now()
+    if abs(extract(epoch from (v_ended_at - now()))) <= 5 then
+      insert into test_results (test_name, status, detail)
+      values ('Gap A (i): Server-authoritative ended_at', 'PASS', 'ended_at was server-stamped to now()');
+    else
+      insert into test_results (test_name, status, detail)
+      values ('Gap A (i): Server-authoritative ended_at', 'FAIL', 'Stored ended_at was not overwritten with now(): ' || coalesce(v_ended_at::text, 'null'));
+    end if;
+
+    -- Gap A (ii): duration_seconds equals server-computed seconds (approx 2700s, not 99999)
+    if v_duration <> 99999 and abs(v_duration - 2700) <= 10 then
+      insert into test_results (test_name, status, detail)
+      values ('Gap A (ii): Server-computed duration_seconds', 'PASS', 'duration_seconds correctly computed as ' || v_duration);
+    else
+      insert into test_results (test_name, status, detail)
+      values ('Gap A (ii): Server-computed duration_seconds', 'FAIL', 'Stored duration_seconds was not server-computed: ' || coalesce(v_duration::text, 'null'));
+    end if;
+
+    -- Gap A (iii): Reject updating ended_at/duration_seconds when not completing visit
+    begin
+      update public.farm_visits
+      set ended_at = now()
+      where id = v_visit_a1_id; -- visit_a1 is still in_progress
+      insert into test_results (test_name, status, detail)
+      values ('Gap A (iii): Reject standalone ended_at update', 'FAIL', 'Allowed setting ended_at on in_progress visit without completing');
+    exception when others then
+      if sqlerrm like '%ended_at can only be set when completing a visit%' then
+        insert into test_results (test_name, status, detail)
+        values ('Gap A (iii): Reject standalone ended_at update', 'PASS', 'Strictly rejected: ' || sqlerrm);
+      else
+        insert into test_results (test_name, status, detail)
+        values ('Gap A (iii): Reject standalone ended_at update', 'FAIL', 'Unexpected error: ' || sqlerrm);
+      end if;
+    end;
+  end;
+
+  -- =========================================================================
+  -- 24. GAP B: Views Write Privileges Revocation
+  -- =========================================================================
+  begin
+    perform set_config('role', 'authenticated', true);
+    perform set_config('request.jwt.claim.sub', v_agent_a_id::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_agent_a_id::text, 'role', 'authenticated')::text, true);
+
+    v_leaked_privs := '';
+    foreach v_view_name in array array['visits_full', 'farm_visits_full', 'farmers_full', 'farmers_masked', 'farmers_viewer_masked', 'farmers_full_masked'] loop
+      if has_table_privilege('authenticated', 'public.' || v_view_name, 'INSERT') then
+        v_leaked_privs := v_leaked_privs || v_view_name || ':INSERT, ';
+      end if;
+      if has_table_privilege('authenticated', 'public.' || v_view_name, 'UPDATE') then
+        v_leaked_privs := v_leaked_privs || v_view_name || ':UPDATE, ';
+      end if;
+      if has_table_privilege('authenticated', 'public.' || v_view_name, 'DELETE') then
+        v_leaked_privs := v_leaked_privs || v_view_name || ':DELETE, ';
+      end if;
+      if has_table_privilege('authenticated', 'public.' || v_view_name, 'TRUNCATE') then
+        v_leaked_privs := v_leaked_privs || v_view_name || ':TRUNCATE, ';
+      end if;
+    end loop;
+
+    if v_leaked_privs = '' then
+      insert into test_results (test_name, status, detail)
+      values ('Gap B: Views write privileges revoked', 'PASS', 'authenticated has SELECT-only on all 6 views');
+    else
+      insert into test_results (test_name, status, detail)
+      values ('Gap B: Views write privileges revoked', 'FAIL', 'authenticated still has write privileges on views: ' || v_leaked_privs);
+    end if;
   end;
 
 end $$;
 
--- Output test results grid
+-- Output EXACTLY ONE result grid so all rows are visible in the SQL editor
 select
   id,
   test_name,
@@ -926,12 +1132,5 @@ select
   detail
 from test_results
 order by id;
-
--- Summary counts
-select
-  count(*) filter (where status = 'PASS') as passed,
-  count(*) filter (where status = 'FAIL') as failed,
-  count(*) as total
-from test_results;
 
 rollback;

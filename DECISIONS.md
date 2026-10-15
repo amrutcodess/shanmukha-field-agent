@@ -50,6 +50,7 @@ The following items were explicitly moved from Phase 1 to Phase 2 (Admin Basics)
    - `008_v2_seed_catalogs.sql` seeds catalog placeholders and exact value-added services.
    - `009_fix_constraints.sql` tightens composite FK, unique index, and exclusion constraints.
    - `010_gate1_security_fixes.sql` addresses Gate 1 blockers B1-B6 forward-only (view security_invoker, authoritative times, consent RLS lockdown, phone masking, merge location repointing, unique catalog indexes, and small fixes).
+   - `011_gate1_fixes_2.sql` resolves Gate 1 Gap A (server-calculated visit completion times and duration) and Gap B (explicit revocation of write privileges on views).
 2. **Target Table Naming**:
    - v2 visit records reside in `public.farm_visits` and `public.farm_visits_full` to ensure 100% uninterrupted operation of legacy `public.visits` until final cutover.
 3. **Storage Buckets**:

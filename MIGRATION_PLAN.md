@@ -17,8 +17,9 @@ This document describes the schema evolution strategy from v1 to v2 for Shanmukh
 | **007** | `007_v2_rls_and_storage.sql` | Configures strict RLS across all tables, private `visit-photos` storage bucket and access policies, `farmers_full` and `farm_visits_full` views. | Staging | Applied |
 | **008** | `008_v2_seed_catalogs.sql` | Seeds required value-added services and placeholder catalog items. | Staging | Applied |
 | **009** | `009_fix_constraints.sql` | Corrects composite foreign key, agent in-progress uniqueness, and exclusion constraint definitions. | Staging | Applied |
-| **010** | `010_gate1_security_fixes.sql` | Forward-only resolution of Gate 1 blockers B1-B6: sets `security_invoker = true` on views, enforces server-authoritative times on INSERT, closes consent bypass, enforces DB phone masking (`farmers_masked`), adds farmer repointing to `admin_merge_location`, deduplicates crops/products and adds unique indexes, and small fixes. | Staging | Ready for staging execution |
-| **Phase 4** | `011_v2_rpcs_and_strict_writes.sql` | RPC-only writes (`start_visit`, `end_visit`, `sync_offline_visit`), revoking direct INSERT and UPDATE permissions on `farm_visits`. | Staging | **PENDING (Phase 4)** |
+| **010** | `010_gate1_security_fixes.sql` | Forward-only resolution of Gate 1 blockers B1-B6: sets `security_invoker = true` on views, enforces server-authoritative times on INSERT, closes consent bypass, enforces DB phone masking (`farmers_masked`), adds farmer repointing to `admin_merge_location`, deduplicates crops/products and adds unique indexes, and small fixes. | Staging | Applied |
+| **011** | `011_gate1_fixes_2.sql` | Forward-only resolution of Gate 1 Gap A (server-calculated visit completion times & duration) and Gap B (explicit revocation of write privileges on views). | Staging | Ready for staging execution |
+| **Phase 4** | `012_v2_rpcs_and_strict_writes.sql` | RPC-only writes (`start_visit`, `end_visit`, `sync_offline_visit`), revoking direct INSERT and UPDATE permissions on `farm_visits`. | Staging | **PENDING (Phase 4)** |
 | **Phase 8** | `cutover_v1_to_v2.sql` | Final cutover script (executed only during maintenance window with owner approval): migrates legacy visit/farmer data if required, marks legacy `visits` read-only. | Staging rehearsal -> Production | **PENDING (Phase 8)** |
 
 ---
