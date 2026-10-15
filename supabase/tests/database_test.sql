@@ -1090,50 +1090,52 @@ begin
         16.508174, 80.650015, 'native_continuous', 'server'
       );
     exception when others then
-      -- Named error row so the failure is visible in the grid
+      -- Named error row identifying the failing statement
       insert into test_results (test_name, status, detail)
-      values ('Gap A setup: in_progress insert for Agent C', 'FAIL',
-        'Failed to insert in_progress visit for Agent C: ' || sqlerrm);
-      -- Skip Gap A sub-tests by jumping to the outer exception handler
-      raise;
+      values ('Gap A: Setup in_progress insert for Agent C', 'FAIL',
+        'Failing statement: insert into farm_visits - ' || sqlerrm);
+      v_gap_visit_id := null;
     end;
 
-    insert into public.visit_services (visit_id, service_id)
-    values (v_gap_visit_id, v_service_id);
+    if v_gap_visit_id is not null then
+      insert into public.visit_services (visit_id, service_id)
+      values (v_gap_visit_id, v_service_id);
 
-    -- Agent C attempts to complete with backdated ended_at (5 days ago) and forged duration_seconds (99999)
-    update public.farm_visits
-    set status            = 'completed',
-        ended_at          = now() - interval '5 days',
-        duration_seconds  = 99999,
-        crop_stage_id     = v_stage_id,
-        no_services_chosen = false
-    where id = v_gap_visit_id;
+      -- Agent C attempts to complete with backdated ended_at (5 days ago) and forged duration_seconds (99999)
+      update public.farm_visits
+      set status            = 'completed',
+          ended_at          = now() - interval '5 days',
+          duration_seconds  = 99999,
+          observations_diagnosis = 'Gap A completion test',
+          crop_stage_id     = v_stage_id,
+          no_services_chosen = false
+      where id = v_gap_visit_id;
 
-    select ended_at, duration_seconds into v_ended_at, v_duration
-    from public.farm_visits where id = v_gap_visit_id;
+      select ended_at, duration_seconds into v_ended_at, v_duration
+      from public.farm_visits where id = v_gap_visit_id;
 
-    -- Gap A (i): ended_at must be within 5 s of now() (server-stamped), not 5 days ago
-    if v_ended_at is not null and abs(extract(epoch from (v_ended_at - now()))) <= 5 then
-      insert into test_results (test_name, status, detail)
-      values ('Gap A (i): Server-authoritative ended_at', 'PASS',
-        'ended_at was server-stamped to now()');
-    else
-      insert into test_results (test_name, status, detail)
-      values ('Gap A (i): Server-authoritative ended_at', 'FAIL',
-        'Stored ended_at was not overwritten with now(); got: ' || coalesce(v_ended_at::text, 'null'));
-    end if;
+      -- Gap A (i): ended_at must be within 5 s of now() (server-stamped), not 5 days ago
+      if v_ended_at is not null and abs(extract(epoch from (v_ended_at - now()))) <= 5 then
+        insert into test_results (test_name, status, detail)
+        values ('Gap A (i): Server-authoritative ended_at', 'PASS',
+          'ended_at was server-stamped to now()');
+      else
+        insert into test_results (test_name, status, detail)
+        values ('Gap A (i): Server-authoritative ended_at', 'FAIL',
+          'Stored ended_at was not overwritten with now(); got: ' || coalesce(v_ended_at::text, 'null'));
+      end if;
 
-    -- Gap A (ii): duration_seconds must NOT be 99999 and must be near 0 s (visit was seconds old)
-    if v_duration is not null and v_duration <> 99999 and abs(v_duration) <= 10 then
-      insert into test_results (test_name, status, detail)
-      values ('Gap A (ii): Server-computed duration_seconds', 'PASS',
-        'duration_seconds correctly server-computed as ' || v_duration);
-    else
-      insert into test_results (test_name, status, detail)
-      values ('Gap A (ii): Server-computed duration_seconds', 'FAIL',
-        'Stored duration_seconds = ' || coalesce(v_duration::text, 'null') ||
-        '; expected near 0 (server-computed), not 99999');
+      -- Gap A (ii): duration_seconds must NOT be 99999 and must be near 0 s (visit was seconds old)
+      if v_duration is not null and v_duration <> 99999 and abs(v_duration) <= 10 then
+        insert into test_results (test_name, status, detail)
+        values ('Gap A (ii): Server-computed duration_seconds', 'PASS',
+          'duration_seconds correctly server-computed as ' || v_duration);
+      else
+        insert into test_results (test_name, status, detail)
+        values ('Gap A (ii): Server-computed duration_seconds', 'FAIL',
+          'Stored duration_seconds = ' || coalesce(v_duration::text, 'null') ||
+          '; expected near 0 (server-computed), not 99999');
+      end if;
     end if;
 
     -- Gap A (iii): Reject setting ended_at standalone on an in_progress visit (uses Agent A's visit)
