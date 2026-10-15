@@ -66,6 +66,11 @@ declare
   v_view_name    text;
   v_leaked_privs text;
 
+  -- Agent C: dedicated actor for Gap A (no prior visits, no overlaps)
+  v_agent_c_id  uuid := 'ffffffff-6666-6666-6666-666666666666';
+  v_farmer_c_id uuid;
+  v_cycle_c_id  uuid;
+
 begin
   -- =========================================================================
   -- FIXTURE SETUP (Executed as postgres / table owner)
@@ -147,11 +152,36 @@ begin
       'in_progress', now(), 16.506174, 80.648015, 'native_continuous', 'server'
     );
 
+    -- Agent C: isolated actor for Gap A (no visits, no overlap hazard)
+    insert into auth.users (
+      id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
+      raw_app_meta_data, raw_user_meta_data, created_at, updated_at
+    ) values (
+      v_agent_c_id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+      'agent_c_p1@test.local', 'dummy', now(), '{"provider":"email"}', '{}', now(), now()
+    ) on conflict (id) do nothing;
+
+    insert into public.profiles (id, role, full_name, username, is_active)
+    values (v_agent_c_id, 'agent', 'Agent C', 'agent_c_p1', true)
+    on conflict (id) do update set role = excluded.role, is_active = excluded.is_active;
+
+    v_farmer_c_id := gen_random_uuid();
+    insert into public.farmers (id, farmer_code, full_name, phone, village_id, farm_lat, farm_lng, farm_accuracy_m, consent_status, onboarded_by)
+    values (v_farmer_c_id, 'SA-100003', 'Farmer Gamma', '+919100000003', v_vil_id, 16.508174, 80.650015, 8.0, 'granted', v_agent_c_id);
+
+    insert into public.farmer_assignments (farmer_id, agent_id, assigned_by)
+    values (v_farmer_c_id, v_agent_c_id, v_admin_id);
+
+    v_cycle_c_id := gen_random_uuid();
+    insert into public.crop_cycles (id, farmer_id, crop_id, season, acreage, sowing_date)
+    values (v_cycle_c_id, v_farmer_c_id, v_crop_id, 'Kharif 2026 C', 2.0, current_date - 20);
+
   exception when others then
     insert into test_results (test_name, status, detail)
     values ('Fixture Setup', 'FAIL', 'Setup error: ' || sqlerrm);
     return;
   end;
+
 
   -- =========================================================================
   -- 1. POSITIVE CONTROL: Agent A sees assigned Farmer A & Visit A1
@@ -278,17 +308,32 @@ begin
   -- 6. Catalogs: Composite FK product/size (Runs as postgres with admin claims)
   -- =========================================================================
   begin
+    -- Run as postgres (superuser): bypasses authoritative-time trigger so we can
+    -- insert a historical completed visit without colliding with Agent A's current
+    -- in_progress visit (unique_agent_in_progress_visit).
     perform set_config('role', '', true);
     perform set_config('request.jwt.claim.sub', v_admin_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', v_admin_id::text, 'role', 'authenticated')::text, true);
 
     v_fk_visit_id := gen_random_uuid();
+    -- Historical completed visit: started/ended 30 days ago, no_services_chosen = true
+    -- (satisfies completion trigger), well outside any other visit's time range.
     insert into public.farm_visits (
-      id, client_uuid, farmer_id, crop_cycle_id, agent_id, status, started_at, start_lat, start_lng, tracking_mode, no_services_chosen, time_source
+      id, client_uuid, farmer_id, crop_cycle_id, agent_id, status,
+      started_at, ended_at, duration_seconds,
+      start_lat, start_lng, tracking_mode, no_services_chosen,
+      observations_diagnosis, crop_stage_id, time_source
     ) values (
-      v_fk_visit_id, gen_random_uuid(), v_farmer_a_id, v_cycle_a_id, v_agent_a_id, 'in_progress', now() + interval '30 days', 16.5, 80.6, 'native_continuous', true, 'server'
+      v_fk_visit_id, gen_random_uuid(), v_farmer_a_id, v_cycle_a_id, v_agent_a_id,
+      'completed',
+      now() - interval '30 days',
+      now() - interval '30 days' + interval '45 minutes',
+      2700,
+      16.5, 80.6, 'native_continuous', true,
+      'FK constraint test visit', v_stage_id, 'server'
     );
 
+    -- Now try to insert a purchase item with mismatched product/size (prod_a + size_b)
     insert into public.visit_purchase_items (visit_id, product_id, product_size_id, quantity)
     values (v_fk_visit_id, v_prod_a_id, v_size_b_id, 2);
 
@@ -307,6 +352,7 @@ begin
     insert into test_results (test_name, status, detail)
     values ('Catalogs: Composite FK product/size', 'FAIL', 'Unexpected error: ' || sqlerrm);
   end;
+
 
   -- =========================================================================
   -- 7. Visits: One in_progress per agent (Runs as postgres with admin claims)
@@ -1023,71 +1069,103 @@ begin
 
   -- =========================================================================
   -- 23. GAP A: Server-Authoritative ended_at & duration_seconds on Visit Completion
+  -- Uses dedicated Agent C (no prior visits) to avoid no_overlapping_agent_visits.
   -- =========================================================================
   begin
+    -- Agent C has no prior visits so no exclusion constraint can fire on INSERT.
     perform set_config('role', 'authenticated', true);
-    perform set_config('request.jwt.claim.sub', v_agent_b_id::text, true);
-    perform set_config('request.jwt.claims', json_build_object('sub', v_agent_b_id::text, 'role', 'authenticated')::text, true);
+    perform set_config('request.jwt.claim.sub', v_agent_c_id::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_agent_c_id::text, 'role', 'authenticated')::text, true);
 
-    -- Insert in_progress visit as Agent B
+    -- Setup: insert in_progress visit as Agent C
     v_gap_visit_id := gen_random_uuid();
-    insert into public.farm_visits (
-      id, client_uuid, farmer_id, agent_id, status, started_at, start_lat, start_lng, tracking_mode, time_source
-    ) values (
-      v_gap_visit_id, gen_random_uuid(), v_farmer_b_id, v_agent_b_id,
-      'in_progress', now() - interval '45 minutes', 16.5, 80.6, 'native_continuous', 'server'
-    );
+
+    begin
+      insert into public.farm_visits (
+        id, client_uuid, farmer_id, crop_cycle_id, agent_id, status, started_at,
+        start_lat, start_lng, tracking_mode, time_source
+      ) values (
+        v_gap_visit_id, gen_random_uuid(), v_farmer_c_id, v_cycle_c_id, v_agent_c_id,
+        'in_progress', now(),
+        16.508174, 80.650015, 'native_continuous', 'server'
+      );
+    exception when others then
+      -- Named error row so the failure is visible in the grid
+      insert into test_results (test_name, status, detail)
+      values ('Gap A setup: in_progress insert for Agent C', 'FAIL',
+        'Failed to insert in_progress visit for Agent C: ' || sqlerrm);
+      -- Skip Gap A sub-tests by jumping to the outer exception handler
+      raise;
+    end;
 
     insert into public.visit_services (visit_id, service_id)
     values (v_gap_visit_id, v_service_id);
 
-    -- Agent attempts to complete visit with backdated ended_at (5 days ago) and forged duration_seconds (99999)
+    -- Agent C attempts to complete with backdated ended_at (5 days ago) and forged duration_seconds (99999)
     update public.farm_visits
-    set status = 'completed',
-        ended_at = now() - interval '5 days',
-        duration_seconds = 99999,
-        crop_stage_id = v_stage_id,
+    set status            = 'completed',
+        ended_at          = now() - interval '5 days',
+        duration_seconds  = 99999,
+        crop_stage_id     = v_stage_id,
         no_services_chosen = false
     where id = v_gap_visit_id;
 
     select ended_at, duration_seconds into v_ended_at, v_duration
     from public.farm_visits where id = v_gap_visit_id;
 
-    -- Gap A (i): ended_at within 5s of now()
-    if abs(extract(epoch from (v_ended_at - now()))) <= 5 then
+    -- Gap A (i): ended_at must be within 5 s of now() (server-stamped), not 5 days ago
+    if v_ended_at is not null and abs(extract(epoch from (v_ended_at - now()))) <= 5 then
       insert into test_results (test_name, status, detail)
-      values ('Gap A (i): Server-authoritative ended_at', 'PASS', 'ended_at was server-stamped to now()');
+      values ('Gap A (i): Server-authoritative ended_at', 'PASS',
+        'ended_at was server-stamped to now()');
     else
       insert into test_results (test_name, status, detail)
-      values ('Gap A (i): Server-authoritative ended_at', 'FAIL', 'Stored ended_at was not overwritten with now(): ' || coalesce(v_ended_at::text, 'null'));
+      values ('Gap A (i): Server-authoritative ended_at', 'FAIL',
+        'Stored ended_at was not overwritten with now(); got: ' || coalesce(v_ended_at::text, 'null'));
     end if;
 
-    -- Gap A (ii): duration_seconds equals server-computed seconds (approx 2700s, not 99999)
-    if v_duration <> 99999 and abs(v_duration - 2700) <= 10 then
+    -- Gap A (ii): duration_seconds must NOT be 99999 and must be near 0 s (visit was seconds old)
+    if v_duration is not null and v_duration <> 99999 and abs(v_duration) <= 10 then
       insert into test_results (test_name, status, detail)
-      values ('Gap A (ii): Server-computed duration_seconds', 'PASS', 'duration_seconds correctly computed as ' || v_duration);
+      values ('Gap A (ii): Server-computed duration_seconds', 'PASS',
+        'duration_seconds correctly server-computed as ' || v_duration);
     else
       insert into test_results (test_name, status, detail)
-      values ('Gap A (ii): Server-computed duration_seconds', 'FAIL', 'Stored duration_seconds was not server-computed: ' || coalesce(v_duration::text, 'null'));
+      values ('Gap A (ii): Server-computed duration_seconds', 'FAIL',
+        'Stored duration_seconds = ' || coalesce(v_duration::text, 'null') ||
+        '; expected near 0 (server-computed), not 99999');
     end if;
 
-    -- Gap A (iii): Reject updating ended_at/duration_seconds when not completing visit
+    -- Gap A (iii): Reject setting ended_at standalone on an in_progress visit (uses Agent A's visit)
+    perform set_config('role', 'authenticated', true);
+    perform set_config('request.jwt.claim.sub', v_agent_a_id::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_agent_a_id::text, 'role', 'authenticated')::text, true);
+
     begin
       update public.farm_visits
       set ended_at = now()
-      where id = v_visit_a1_id; -- visit_a1 is still in_progress
+      where id = v_visit_a1_id; -- visit_a1_id is still in_progress
       insert into test_results (test_name, status, detail)
-      values ('Gap A (iii): Reject standalone ended_at update', 'FAIL', 'Allowed setting ended_at on in_progress visit without completing');
+      values ('Gap A (iii): Reject standalone ended_at update', 'FAIL',
+        'Allowed setting ended_at on in_progress visit without completing');
     exception when others then
       if sqlerrm like '%ended_at can only be set when completing a visit%' then
         insert into test_results (test_name, status, detail)
-        values ('Gap A (iii): Reject standalone ended_at update', 'PASS', 'Strictly rejected: ' || sqlerrm);
+        values ('Gap A (iii): Reject standalone ended_at update', 'PASS',
+          'Strictly rejected: ' || sqlerrm);
       else
         insert into test_results (test_name, status, detail)
-        values ('Gap A (iii): Reject standalone ended_at update', 'FAIL', 'Unexpected error: ' || sqlerrm);
+        values ('Gap A (iii): Reject standalone ended_at update', 'FAIL',
+          'Unexpected error: ' || sqlerrm);
       end if;
     end;
+
+  exception when others then
+    -- Catch re-raised setup failure or any other unexpected error
+    insert into test_results (test_name, status, detail)
+    values ('Gap A: fatal error', 'FAIL', 'Gap A block crashed: ' || sqlerrm);
   end;
+
 
   -- =========================================================================
   -- 24. GAP B: Views Write Privileges Revocation
