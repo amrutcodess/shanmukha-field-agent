@@ -76,7 +76,7 @@ begin
   -- FIXTURE SETUP (Executed as postgres / table owner)
   -- =========================================================================
   begin
-    perform set_config('role', '', true);
+    perform set_config('role', 'postgres', true);
     perform set_config('request.jwt.claim.sub', '', true);
     perform set_config('request.jwt.claims', '', true);
 
@@ -241,7 +241,7 @@ begin
   -- 3. Consent Ledger: Block UPDATE
   -- =========================================================================
   begin
-    perform set_config('role', '', true);
+    perform set_config('role', 'postgres', true);
     perform set_config('request.jwt.claim.sub', '', true);
     perform set_config('request.jwt.claims', '', true);
 
@@ -265,7 +265,7 @@ begin
   -- 4. Consent Ledger: Block DELETE
   -- =========================================================================
   begin
-    perform set_config('role', '', true);
+    perform set_config('role', 'postgres', true);
     perform set_config('request.jwt.claim.sub', '', true);
     perform set_config('request.jwt.claims', '', true);
 
@@ -287,7 +287,7 @@ begin
   -- 5. Consent Ledger: Block TRUNCATE
   -- =========================================================================
   begin
-    perform set_config('role', '', true);
+    perform set_config('role', 'postgres', true);
     perform set_config('request.jwt.claim.sub', '', true);
     perform set_config('request.jwt.claims', '', true);
 
@@ -311,7 +311,7 @@ begin
     -- Run as postgres (superuser): bypasses authoritative-time trigger so we can
     -- insert a historical completed visit without colliding with Agent A's current
     -- in_progress visit (unique_agent_in_progress_visit).
-    perform set_config('role', '', true);
+    perform set_config('role', 'postgres', true);
     perform set_config('request.jwt.claim.sub', v_admin_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', v_admin_id::text, 'role', 'authenticated')::text, true);
 
@@ -358,7 +358,7 @@ begin
   -- 7. Visits: One in_progress per agent (Runs as postgres with admin claims)
   -- =========================================================================
   begin
-    perform set_config('role', '', true);
+    perform set_config('role', 'postgres', true);
     perform set_config('request.jwt.claim.sub', v_admin_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', v_admin_id::text, 'role', 'authenticated')::text, true);
 
@@ -390,7 +390,7 @@ begin
   -- 8. Visits: Non-overlapping time (btree_gist) (Runs as postgres with admin claims)
   -- =========================================================================
   begin
-    perform set_config('role', '', true);
+    perform set_config('role', 'postgres', true);
     perform set_config('request.jwt.claim.sub', v_admin_id::text, true);
     perform set_config('request.jwt.claims', json_build_object('sub', v_admin_id::text, 'role', 'authenticated')::text, true);
 
@@ -821,7 +821,7 @@ begin
     end;
 
     -- 18d. Farmer code generation check
-    perform set_config('role', '', true);
+    perform set_config('role', 'postgres', true);
     perform set_config('request.jwt.claim.sub', '', true);
     perform set_config('request.jwt.claims', '', true);
 
@@ -857,7 +857,7 @@ begin
     end if;
 
     -- 19b. Viewer reads masked phone through view (client_sees_phone is false)
-    perform set_config('role', '', true);
+    perform set_config('role', 'postgres', true);
     perform set_config('request.jwt.claim.sub', '', true);
     perform set_config('request.jwt.claims', '', true);
     update public.app_config set value = 'false'::jsonb where key = 'client_sees_phone';
@@ -876,7 +876,7 @@ begin
     end if;
 
     -- 19c. Flipping client_sees_phone to true unmasks phone
-    perform set_config('role', '', true);
+    perform set_config('role', 'postgres', true);
     perform set_config('request.jwt.claim.sub', '', true);
     perform set_config('request.jwt.claims', '', true);
     update public.app_config set value = 'true'::jsonb where key = 'client_sees_phone';
@@ -895,7 +895,7 @@ begin
     end if;
 
     -- Revert config to false
-    perform set_config('role', '', true);
+    perform set_config('role', 'postgres', true);
     perform set_config('request.jwt.claim.sub', '', true);
     perform set_config('request.jwt.claims', '', true);
     update public.app_config set value = 'false'::jsonb where key = 'client_sees_phone';
@@ -958,7 +958,7 @@ begin
   -- 21. B6: Seed Idempotency & Unique Catalog Indexes
   -- =========================================================================
   begin
-    perform set_config('role', '', true);
+    perform set_config('role', 'postgres', true);
     perform set_config('request.jwt.claim.sub', '', true);
     perform set_config('request.jwt.claims', '', true);
 
@@ -1027,7 +1027,7 @@ begin
     end;
 
     -- 22c. Server timestamps trigger overwrites client-provided values
-    perform set_config('role', '', true);
+    perform set_config('role', 'postgres', true);
     perform set_config('request.jwt.claim.sub', '', true);
     perform set_config('request.jwt.claims', '', true);
 
