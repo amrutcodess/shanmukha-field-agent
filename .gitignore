@@ -33,3 +33,5 @@ dist-ssr
 
 # Supabase CLI local state (never commit: holds the linked project ref)
 supabase/.temp/
+__pycache__/
+*.pyc

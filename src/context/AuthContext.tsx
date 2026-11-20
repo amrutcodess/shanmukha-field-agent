@@ -1,174 +1,128 @@
-import React, { createContext, useState, useEffect, useContext, ReactNode } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase, formatAgentEmail } from '../lib/supabase';
-import { Profile, UserRole } from '../types';
-import { setLanguage } from '../i18n/i18n';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { useData } from './DataContext';
+import { Farmer } from '../types';
 
 interface AuthContextType {
-  user: User | null;
-  profile: Profile | null;
-  session: Session | null;
-  isLoading: boolean;
-  login: (usernameInput: string, passwordInput: string, targetRole: UserRole) => Promise<{ success: boolean; error?: string }>;
-  logout: () => Promise<void>;
-  refreshProfile: () => Promise<void>;
+  // Farmer session
+  isFarmerLoggedIn: boolean;
+  activeFarmer: Farmer | null;
+  farmerPhone: string;
+  loginFarmer: (phone: string, otp: string) => { success: boolean; needsSignUp: boolean };
+  logoutFarmer: () => void;
+  setLoggedInFarmer: (farmer: Farmer) => void;
+
+  // Admin session
+  isAdminLoggedIn: boolean;
+  adminEmail: string;
+  loginAdmin: (email: string, pass: string) => boolean;
+  logoutAdmin: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const KEYS = {
+  FARMER_SESSION: 'shanmukha_farmer_session',
+  ADMIN_SESSION: 'shanmukha_admin_session'
+};
+
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const { farmers } = useData();
 
-  const fetchProfile = async (userId: string): Promise<Profile | null> => {
+  // Farmer session state: stored as JSON { farmerId, phone } or null
+  const [farmerSession, setFarmerSession] = useState<{ farmerId: string; phone: string } | null>(() => {
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (error) {
-        console.error('Error fetching profile:', error);
-        return null;
-      }
-      return data as Profile;
-    } catch (err) {
-      console.error('Failed to fetch profile:', err);
-      return null;
+      const saved = localStorage.getItem(KEYS.FARMER_SESSION);
+      if (saved) return JSON.parse(saved);
+      // Default to Ramesh Reddy (9876543210) for immediate seamless demo
+      return { farmerId: 'farmer-1', phone: '9876543210' };
+    } catch {
+      return { farmerId: 'farmer-1', phone: '9876543210' };
     }
-  };
+  });
 
+  // Admin session state: stored as JSON { email } or null
+  const [adminSession, setAdminSession] = useState<{ email: string } | null>(() => {
+    try {
+      const saved = localStorage.getItem(KEYS.ADMIN_SESSION);
+      if (saved) return JSON.parse(saved);
+      return { email: 'admin@shanmukha.in' };
+    } catch {
+      return { email: 'admin@shanmukha.in' };
+    }
+  });
+
+  // Sync Farmer session to localStorage
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        const { data: { session: currentSession } } = await supabase.auth.getSession();
-        setSession(currentSession);
-        setUser(currentSession?.user ?? null);
+    if (farmerSession) {
+      localStorage.setItem(KEYS.FARMER_SESSION, JSON.stringify(farmerSession));
+    } else {
+      localStorage.removeItem(KEYS.FARMER_SESSION);
+    }
+  }, [farmerSession]);
 
-        if (currentSession?.user) {
-          const prof = await fetchProfile(currentSession.user.id);
-          setProfile(prof);
-          if (prof?.preferred_language) {
-            setLanguage(prof.preferred_language);
-          }
-        }
-      } catch (err) {
-        console.error('Auth init error:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+  // Sync Admin session to localStorage
+  useEffect(() => {
+    if (adminSession) {
+      localStorage.setItem(KEYS.ADMIN_SESSION, JSON.stringify(adminSession));
+    } else {
+      localStorage.removeItem(KEYS.ADMIN_SESSION);
+    }
+  }, [adminSession]);
 
-    initAuth();
+  const activeFarmer: Farmer | null = farmerSession 
+    ? (farmers.find(f => f.id === farmerSession.farmerId) || farmers[0] || null)
+    : null;
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
-      setSession(newSession);
-      setUser(newSession?.user ?? null);
+  const loginFarmer = (phone: string, otp: string): { success: boolean; needsSignUp: boolean } => {
+    if (otp !== '1234') {
+      return { success: false, needsSignUp: false };
+    }
 
-      if (newSession?.user) {
-        const prof = await fetchProfile(newSession.user.id);
-        setProfile(prof);
-        if (prof?.preferred_language) {
-          setLanguage(prof.preferred_language);
-        }
-      } else {
-        setProfile(null);
-      }
-      setIsLoading(false);
-    });
+    const clean = phone.replace(/\D/g, '');
+    const matched = farmers.find(f => f.phone.replace(/\D/g, '') === clean);
 
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  const login = async (usernameInput: string, passwordInput: string, targetRole: UserRole) => {
-    setIsLoading(true);
-    try {
-      const email = targetRole === 'agent' 
-        ? formatAgentEmail(usernameInput) 
-        : usernameInput.trim();
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password: passwordInput,
-      });
-
-      if (error || !data.user) {
-        console.error('Supabase signInWithPassword error:', error);
-        setIsLoading(false);
-        return { success: false, error: error?.message || 'auth.err_invalid_credentials' };
-      }
-
-      const userProfile = await fetchProfile(data.user.id);
-
-      if (!userProfile) {
-        await supabase.auth.signOut();
-        setIsLoading(false);
-        return { success: false, error: 'Profile record not found for this user.' };
-      }
-
-      if (userProfile.role !== targetRole) {
-        await supabase.auth.signOut();
-        setIsLoading(false);
-        return { 
-          success: false, 
-          error: `Account role mismatch: expected ${targetRole}, found ${userProfile.role}`
-        };
-      }
-
-      if (!userProfile.is_active) {
-        await supabase.auth.signOut();
-        setIsLoading(false);
-        return { success: false, error: 'auth.err_inactive' };
-      }
-
-      setProfile(userProfile);
-      setUser(data.user);
-      setSession(data.session);
-
-      if (userProfile.preferred_language) {
-        setLanguage(userProfile.preferred_language);
-      }
-
-      setIsLoading(false);
-      return { success: true };
-    } catch (err: any) {
-      console.error('Login exception:', err);
-      setIsLoading(false);
-      return { success: false, error: err.message || 'auth.err_generic' };
+    if (matched) {
+      setFarmerSession({ farmerId: matched.id, phone });
+      return { success: true, needsSignUp: false };
+    } else {
+      // Unregistered phone number -> route to Sign Up onboarding
+      return { success: false, needsSignUp: true };
     }
   };
 
-  const logout = async () => {
-    setIsLoading(true);
-    await supabase.auth.signOut();
-    setUser(null);
-    setProfile(null);
-    setSession(null);
-    setIsLoading(false);
+  const logoutFarmer = () => {
+    setFarmerSession(null);
   };
 
-  const refreshProfile = async () => {
-    if (user) {
-      const prof = await fetchProfile(user.id);
-      setProfile(prof);
+  const setLoggedInFarmer = (farmer: Farmer) => {
+    setFarmerSession({ farmerId: farmer.id, phone: farmer.phone });
+  };
+
+  const loginAdmin = (email: string, pass: string): boolean => {
+    if (email.trim().toLowerCase() === 'admin@shanmukha.in' && pass === 'admin123') {
+      setAdminSession({ email });
+      return true;
     }
+    return false;
+  };
+
+  const logoutAdmin = () => {
+    setAdminSession(null);
   };
 
   return (
     <AuthContext.Provider
       value={{
-        user,
-        profile,
-        session,
-        isLoading,
-        login,
-        logout,
-        refreshProfile,
+        isFarmerLoggedIn: !!farmerSession && !!activeFarmer,
+        activeFarmer,
+        farmerPhone: farmerSession?.phone || '',
+        loginFarmer,
+        logoutFarmer,
+        setLoggedInFarmer,
+        isAdminLoggedIn: !!adminSession,
+        adminEmail: adminSession?.email || '',
+        loginAdmin,
+        logoutAdmin
       }}
     >
       {children}
@@ -176,10 +130,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   );
 };
 
-export const useAuthContext = () => {
+export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuthContext must be used within an AuthProvider');
+    throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
 };

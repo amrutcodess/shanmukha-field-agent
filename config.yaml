@@ -1,0 +1,21 @@
+markets:
+  - name: UK
+    country_code: GB
+    timezone: Europe/London
+    niche_queries: ["heating engineer", "boiler installation and repair", "air conditioning installer"]
+    locations: ["Leeds", "Sheffield", "Nottingham", "Glasgow", "Cardiff"]
+  - name: UAE
+    country_code: AE
+    timezone: Asia/Dubai
+    niche_queries: ["AC maintenance company", "HVAC contractor", "air conditioning repair"]
+    locations: ["Dubai", "Sharjah", "Abu Dhabi", "Ajman"]
+  - name: US_underserved
+    country_code: US
+    timezone: America/New_York
+    niche_queries: ["HVAC contractor", "heating and air conditioning repair"]
+    locations: ["Fort Wayne IN", "Chattanooga TN", "Lubbock TX", "Spokane WA", "Dayton OH"]
+
+max_results_per_query: 50
+target_total_leads: 250
+min_reviews: 3
+output_file: leads.csv

@@ -1,17 +1,105 @@
 @import "tailwindcss";
 
 @layer base {
+  :root {
+    --forest: #14532D;
+    --leaf: #2E7D32;
+    --fresh: #4CAF50;
+    --mint: #E8F5E9;
+    --sun: #F9A825;
+    --clay: #F57C00;
+    --ink: #0F2A1A;
+    --mist: #F6FAF5;
+  }
+
   html {
-    font-family: 'Noto Sans', 'Noto Sans Telugu', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-family: 'Plus Jakarta Sans', 'Noto Sans Telugu', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
     -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+    min-height: 100%;
+  }
+
+  body {
+    background-color: var(--mist);
+    color: var(--ink);
+    min-height: 100dvh;
+    overflow-x: hidden;
+    position: relative;
+  }
+
+  /* Telugu text requires line-height 1.6 so ascenders/descenders never clip */
+  [lang="te"], .telugu-text {
+    line-height: 1.6 !important;
   }
 }
 
-/* Custom scrollbar hiding for clean mobile scroll chips */
+/* Fixed subtle radial gradient background blobs (10-15% opacity) */
+.bg-ambient-blobs {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.bg-ambient-blobs::before {
+  content: '';
+  position: absolute;
+  top: -10%;
+  left: -10%;
+  width: 60vw;
+  height: 60vw;
+  max-width: 500px;
+  max-height: 500px;
+  background: radial-gradient(circle, rgba(46, 125, 50, 0.12) 0%, rgba(46, 125, 50, 0) 70%);
+  filter: blur(40px);
+}
+
+.bg-ambient-blobs::after {
+  content: '';
+  position: absolute;
+  bottom: 5%;
+  right: -10%;
+  width: 70vw;
+  height: 70vw;
+  max-width: 550px;
+  max-height: 550px;
+  background: radial-gradient(circle, rgba(249, 168, 37, 0.12) 0%, rgba(249, 168, 37, 0) 70%);
+  filter: blur(50px);
+}
+
+/* Glass card styling */
+.glass-card {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 4px 20px -2px rgba(20, 83, 45, 0.05);
+}
+
+/* Tabular figures for numbers */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Safe area insets */
+.safe-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+.safe-top {
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+}
+
+/* Custom scrollbar hiding */
 .scrollbar-none::-webkit-scrollbar {
   display: none;
 }
 .scrollbar-none {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+button, a, input, select, textarea {
+  touch-action: manipulation;
 }

@@ -1,140 +1,126 @@
-// TypeScript definitions for Shanmukha Agritech Field Agent Tracking
+export type Language = 'te' | 'en';
 
-export type UserRole = 'admin' | 'agent';
-export type AppLanguage = 'en' | 'te';
-export type VisitStatus = 'pending' | 'final' | 'closed';
+export type VendorId = 'fyllo' | 'kshema' | 'samunnati' | 'biota';
 
-export interface Profile {
-  id: string;
-  role: UserRole;
-  full_name: string;
-  username: string;
-  phone?: string | null;
-  is_active: boolean;
-  preferred_language: AppLanguage;
-  created_at?: string;
-  updated_at?: string;
+export interface VendorInfo {
+  id: VendorId;
+  name: string;
+  nameTe: string;
+  category: string;
+  categoryTe: string;
+  tagline: string;
+  taglineTe: string;
+  desc: string;
+  descTe: string;
+  icon: string;
+  gradient: string;
+  color: string;
+  bgLight: string;
 }
 
-export interface Region {
+export type IrrigationType = 'Borewell' | 'Canal' | 'Rain-fed';
+export type SeasonType = 'Kharif' | 'Rabi' | 'Summer';
+
+export interface Farmer {
   id: string;
   name: string;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface District {
-  id: string;
-  region_id: string;
-  name: string;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface Village {
-  id: string;
-  district_id: string;
-  name: string;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface Crop {
-  id: string;
-  name_en: string;
-  name_te: string;
-  is_active: boolean;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface Product {
-  id: string;
-  name_en: string;
-  name_te: string;
-  is_active: boolean;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface Visit {
-  id: string;
-  client_uuid: string;
-  agent_id: string;
-  village_id: string;
-  visited_at: string;
-  duration_minutes: number;
-  farmer_name: string;
-  farmer_phone?: string | null;
-  crop_id?: string | null;
-  crop_other?: string | null;
-  diagnosis: string;
-  prescription: string;
-  product_id?: string | null;
-  product_other?: string | null;
-  purchased: boolean;
-  purchase_amount?: number | null;
-  purchase_image_path?: string | null;
-  prescription_image_path?: string | null;
-  status: VisitStatus;
-  finalized_at?: string | null;
-  latitude?: number | null;
-  longitude?: number | null;
-  diagnosis_en?: string | null;
-  prescription_en?: string | null;
-  deleted_at?: string | null;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface VisitFull extends Visit {
-  agent_name?: string;
-  agent_username?: string;
-  agent_phone?: string;
-  village_name?: string;
-  district_id?: string;
-  district_name?: string;
-  region_id?: string;
-  region_name?: string;
-  crop_name_en?: string;
-  crop_name_te?: string;
-  product_name_en?: string;
-  product_name_te?: string;
-}
-
-export interface VisitAudit {
-  id: string;
-  visit_id: string;
-  changed_by?: string;
-  action: string;
-  old_values?: any;
-  new_values?: any;
-  created_at: string;
-}
-
-export interface OfflineVisitDraft {
-  id?: number; // IndexedDB autoincrement primary key
-  client_uuid: string;
-  agent_id: string;
-  visited_at: string;
-  duration_minutes: number;
-  farmer_name: string;
-  farmer_phone?: string;
-  region: string;
-  district: string;
+  nameTe: string;
+  phone: string;
   village: string;
-  crop_id?: string;
-  crop_other?: string;
-  diagnosis: string;
-  prescription: string;
-  product_id?: string;
-  product_other?: string;
-  purchased: boolean;
-  purchase_amount?: number;
-  photo_blob?: Blob | null; // Stored offline image
-  latitude?: number;
-  longitude?: number;
-  created_at: number; // timestamp
-  sync_attempts?: number;
-  error_message?: string;
+  villageTe: string;
+  district: string;
+  districtTe: string;
+  mandal?: string;
+  state: string;
+  crop: string;
+  cropTe: string;
+  acres: number;
+  avatar?: string;
+  // Geotag fields
+  lat?: number;
+  lng?: number;
+  accuracy?: number;
+  geotagCapturedAt?: string;
+  // Farm onboarding specifics
+  irrigationType?: IrrigationType;
+  season?: SeasonType;
+}
+
+export interface ConsentRecord {
+  id: string;
+  farmerId: string;
+  farmerName: string;
+  farmerPhone: string;
+  farmerVillage: string;
+  vendorId: VendorId;
+  vendorName: string;
+  status: 'active' | 'withdrawn';
+  consentedAt: string;
+  withdrawnAt?: string;
+}
+
+export type KeyValueStatus = 'good' | 'warning' | 'critical';
+
+export interface ReportKeyValue {
+  label: string;
+  labelTe?: string;
+  value: string;
+  status: KeyValueStatus;
+  unit?: string;
+  progressPercent?: number;
+}
+
+export interface Report {
+  id: string;
+  farmerId: string;
+  vendorId: VendorId;
+  vendorName: string;
+  title: string;
+  titleTe: string;
+  date: string;
+  summary: string;
+  summaryTe: string;
+  keyValues: ReportKeyValue[];
+  advice: string;
+  adviceTe: string;
+  isNew: boolean;
+  pdfUrl?: string;
+}
+
+export type AlertType = 'weather' | 'insurance' | 'loan' | 'soil' | 'admin' | 'general';
+
+export interface AlertNotification {
+  id: string;
+  farmerId: string; // or 'all'
+  title: string;
+  titleTe: string;
+  message: string;
+  messageTe: string;
+  vendorId?: VendorId;
+  vendorName?: string;
+  type: AlertType;
+  date: string;
+  isRead: boolean;
+}
+
+export interface ActivityLog {
+  id: string;
+  timestamp: string;
+  farmerName: string;
+  vendorName: string;
+  action: 'Consent given' | 'Consent withdrawn' | 'Request sent' | 'Result received' | 'Report published' | 'Notification sent';
+  status: 'Completed' | 'Pending' | 'Active' | 'Delivered';
+  details?: string;
+}
+
+export interface FieldVisitRequest {
+  id: string;
+  farmerId: string;
+  farmerName: string;
+  phone: string;
+  village: string;
+  crop: string;
+  message: string;
+  createdAt: string;
+  status: 'pending' | 'attended';
 }
